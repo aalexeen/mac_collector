@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — MAC Collector{% endblock %}
+{% block content %}
+<h1>Audit Log</h1>
+
+<div class="card">
+    <form method="get" action="/audit" class="inline-form">
+        <div class="form-row" style="flex:0 0 180px">
+            <label for="action">Action</label>
+            <select id="action" name="action">
+                <option value="">All actions</option>
+                {% for a in actions %}
+                <option value="{{ a }}" {% if a == q_action %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row" style="flex:0 0 180px">
+            <label for="since">From</label>
+            <input type="date" id="since" name="since" value="{{ q_since or '' }}">
+        </div>
+        <div class="form-row" style="flex:0 0 180px">
+            <label for="until">Until</label>
+            <input type="date" id="until" name="until" value="{{ q_until or '' }}">
+        </div>
+        <div class="form-row" style="flex:1 1 220px">
+            <label for="q">Search</label>
+            <input type="text" id="q" name="q" value="{{ q or '' }}"
+                   placeholder="any field…">
+        </div>
+        <div class="form-row" style="flex:0 0 120px">
+            <label for="limit">Per page</label>
+            <select id="limit" name="limit">
+                {% for s in page_sizes %}
+                <option value="{{ s }}" {% if s == limit %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary">Filter</button>
+        </div>
+        {% if q_action or q_since or q_until or q %}
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <a href="/audit" class="btn btn-secondary">Clear</a>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card">
+    <table data-sortable data-sort-col="0" data-sort-dir="desc">
+        <thead>
+            <tr>
+                <th class="sortable">Time</th>
+                <th class="sortable">User</th>
+                <th class="sortable">Action</th>
+                <th class="sortable">IP</th>
+                <th class="sortable">Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in entries %}
+        <tr>
+            <td style="white-space:nowrap">{{ (row.logged_at | localdt).strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td>{{ row.user_email or '—' }}</td>
+            <td><code>{{ row.action }}</code></td>
+            <td>{{ row.ip_address }}</td>
+            <td style="font-size:.8rem;color:#666">
+                {% if row.detail and row.detail != '{}' %}{{ row.detail }}{% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="color:#888;text-align:center">No entries found.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total > 0 %}
+    <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center">
+        {% if offset > 0 %}
+        <a href="/audit?action={{ q_action or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&q={{ q or '' }}&limit={{ limit }}&offset={{ [offset - limit, 0]|max }}"
+           class="btn btn-secondary">← Prev</a>
+        {% endif %}
+        <span style="font-size:.85rem;color:#888">
+            {{ offset + 1 }}–{{ [offset + limit, total]|min }} of {{ total }}{% if total == offset + limit %}&plus;{% endif %}
+        </span>
+        {% if offset + limit < total %}
+        <a href="/audit?action={{ q_action or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&q={{ q or '' }}&limit={{ limit }}&offset={{ offset + limit }}"
+           class="btn btn-secondary">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

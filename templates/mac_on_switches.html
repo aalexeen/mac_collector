@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}MACs on Switches — MAC Collector{% endblock %}
+{% block content %}
+<h1>MACs on Switches</h1>
+
+<div class="card">
+    <div class="inline-form">
+        <div class="form-row">
+            <label for="switch_ip">Switch</label>
+            <select id="switch_ip" name="switch_ip"
+                    hx-get="/mac-on-switches/table"
+                    hx-trigger="change"
+                    hx-target="#mac-table"
+                    hx-indicator="#sw-spinner">
+                <option value="">— select switch —</option>
+                {% for sw in switches %}
+                <option value="{{ sw.ip_address }}"
+                    {% if selected_ip == sw.ip_address|string %}selected{% endif %}>
+                    {{ sw.ip_address }}{% if sw.hostname %} — {{ sw.hostname }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% if user.role in ('operator', 'admin') %}
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary"
+                    hx-post="/mac-on-switches/update"
+                    hx-target="#mac-table"
+                    hx-include="#switch_ip"
+                    hx-indicator="#sw-spinner"
+                    hx-disabled-elt="this">
+                Update
+            </button>
+        </div>
+        {% endif %}
+        <div class="form-row" style="flex:0; align-self:flex-end; padding-bottom:1rem">
+            <span id="sw-spinner" class="htmx-indicator" style="font-size:0.85rem;color:#888">
+                Loading…
+            </span>
+        </div>
+    </div>
+</div>
+
+<div id="mac-table">
+    {% include "_mac_table.html" %}
+</div>
+{% endblock %}

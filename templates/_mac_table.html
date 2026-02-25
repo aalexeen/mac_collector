@@ -1,0 +1,35 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if selected_ip is not none %}
+<div class="card">
+    <h2>
+        {{ selected_ip }}{% if switch_hostname %} — {{ switch_hostname }}{% endif %}
+        {% if macs %}({{ macs|length }}){% endif %}
+    </h2>
+    {% if macs %}
+    <table data-sortable data-sort-col="2" data-sort-dir="asc">
+        <thead>
+            <tr>
+                <th class="sortable">MAC</th>
+                <th class="sortable">VLAN</th>
+                <th class="sortable">Interface</th>
+                <th class="sortable">Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in macs %}
+        <tr>
+            <td><code>{{ row.mac_address }}</code></td>
+            <td>{{ row.vlan_ids | join(', ') if row.vlan_ids else '—' }}</td>
+            <td>{{ row.interfaces | join(', ') if row.interfaces else '—' }}</td>
+            <td>{{ (row.last_seen | localdt).strftime('%Y-%m-%d %H:%M') if row.last_seen else '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% elif not error %}
+    <p style="color:#888">No MAC addresses found for this switch.</p>
+    {% endif %}
+</div>
+{% endif %}

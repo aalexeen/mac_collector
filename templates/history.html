@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}History — MAC Collector{% endblock %}
+{% block content %}
+<h1>Change History</h1>
+
+<div class="card">
+    <form method="get" action="/history" class="inline-form">
+        <div class="form-row">
+            <label for="mac">Filter by MAC</label>
+            <input type="text" id="mac" name="mac" value="{{ q_mac or '' }}"
+                   placeholder="aa:bb:cc:dd:ee:ff (partial ok)">
+        </div>
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary">Filter</button>
+        </div>
+        {% if q_mac %}
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <a href="/history" class="btn btn-secondary">Clear</a>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card">
+    <table data-sortable data-sort-col="0" data-sort-dir="desc">
+        <thead>
+            <tr>
+                <th class="sortable">Time</th>
+                <th class="sortable">MAC</th>
+                <th class="sortable">IP / Switch IP</th>
+                <th class="sortable">VLAN</th>
+                <th class="sortable">Interface</th>
+                <th>Changes</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in entries %}
+        <tr>
+            <td style="white-space:nowrap">{{ (row.changed_at | localdt).strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td><code>{{ row.mac_address }}</code></td>
+            <td>{{ row.ip_addresses | join(', ') if row.ip_addresses else '—' }}</td>
+            <td>{{ row.vlan_ids | join(', ') if row.vlan_ids else '—' }}</td>
+            <td>{{ row.interfaces | join(', ') if row.interfaces else '—' }}</td>
+            <td>
+                {% set f = row.change_flags %}
+                {% if f == 0 %}<span class="badge badge-gone">GONE</span>
+                {% else %}
+                {% if f | bitand(4) %}<span class="badge badge-operator">IP</span> {% endif %}
+                {% if f | bitand(2) %}<span class="badge badge-viewer">VLAN</span> {% endif %}
+                {% if f | bitand(1) %}<span class="badge badge-admin">IFACE</span> {% endif %}
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="color:#888;text-align:center">No history found.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

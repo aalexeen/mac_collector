@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MAC Collector{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #333; }
+        nav { background: #1a1a2e; color: #fff; padding: 0.75rem 1.5rem;
+              display: flex; align-items: center; gap: 1.5rem; }
+        nav a { color: #ccc; text-decoration: none; font-size: 0.9rem; }
+        nav a:hover, nav a.active { color: #fff; }
+        nav .brand { font-weight: 700; font-size: 1.1rem; color: #fff; margin-right: auto; }
+        nav .user-info { font-size: 0.85rem; color: #aaa; }
+        main { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+        h1 { margin-bottom: 1.5rem; font-size: 1.5rem; }
+        h2 { margin-bottom: 1rem; font-size: 1.2rem; }
+        .card { background: #fff; border-radius: 6px; padding: 1.5rem;
+                box-shadow: 0 1px 4px rgba(0,0,0,.1); margin-bottom: 1.5rem; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
+        th { background: #f8f8f8; font-weight: 600; }
+        tr:hover td { background: #fafafa; }
+        .btn { display: inline-block; padding: 0.4rem 0.9rem; border-radius: 4px;
+               border: none; cursor: pointer; font-size: 0.85rem; text-decoration: none; }
+        .btn-primary { background: #1a1a2e; color: #fff; }
+        .btn-primary:hover { background: #2a2a4e; }
+        .btn-danger { background: #c0392b; color: #fff; }
+        .btn-danger:hover { background: #a93226; }
+        .btn-secondary { background: #eee; color: #333; }
+        .btn-secondary:hover { background: #ddd; }
+        input[type=text], input[type=email], input[type=password], select {
+            padding: 0.45rem 0.7rem; border: 1px solid #ccc; border-radius: 4px;
+            font-size: 0.9rem; width: 100%; }
+        label { display: block; margin-bottom: 0.3rem; font-size: 0.85rem; font-weight: 500; }
+        .form-row { margin-bottom: 1rem; }
+        .inline-form { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
+        .inline-form .form-row { margin-bottom: 0; flex: 1 1 200px; }
+        .alert { padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem; }
+        .alert-error { background: #fdecea; color: #c0392b; border: 1px solid #f5c6cb; }
+        .alert-success { background: #eafaf1; color: #1e8449; border: 1px solid #a9dfbf; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px;
+                 font-size: 0.75rem; font-weight: 600; }
+        .badge-admin { background: #2e4057; color: #fff; }
+        .badge-operator { background: #048a81; color: #fff; }
+        .badge-viewer { background: #aaa; color: #fff; }
+        .badge-enabled { background: #27ae60; color: #fff; }
+        .badge-disabled { background: #e74c3c; color: #fff; }
+        .badge-gone { background: #888; color: #fff; }
+        details summary { list-style: none; cursor: pointer; }
+        details summary::-webkit-details-marker { display: none; }
+        .edit-form { margin-top: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; }
+        .edit-form input[type=text] { width: auto; flex: 1 1 120px; }
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator { display: inline; }
+        .htmx-request.htmx-indicator { display: inline; }
+        th.sortable { cursor: pointer; user-select: none; }
+        th.sortable:hover { background: #efefef; }
+        th.sortable::after { content: ' ⇅'; color: #bbb; font-size: 0.8em; }
+        th.sort-asc::after  { content: ' ▲'; color: #555; font-size: 0.8em; }
+        th.sort-desc::after { content: ' ▼'; color: #555; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+{% if user %}
+<nav>
+    <span class="brand">MAC Collector</span>
+    <a href="/">Search</a>
+    <a href="/mac-on-switches">MACs on Switches</a>
+    {% if user.role in ('operator', 'admin') %}<a href="/switches">Switches</a>{% endif %}
+    {% if user.role == 'admin' %}
+        <a href="/users">Users</a>
+        <a href="/audit">Audit</a>
+    {% endif %}
+    <a href="/profile">Profile</a>
+    <span class="user-info">{{ user.email }} ({{ user.role }})</span>
+    <form method="post" action="/logout" style="margin:0">
+        <button type="submit" class="btn btn-secondary" style="padding:.3rem .7rem">Logout</button>
+    </form>
+</nav>
+{% endif %}
+<main>
+    {% block content %}{% endblock %}
+</main>
+<script>
+function initSortableTables(root) {
+    (root || document).querySelectorAll('table[data-sortable]').forEach(table => {
+        if (table._sortable) return; // already initialized
+        table._sortable = true;
+        const headers = table.querySelectorAll('thead th.sortable');
+
+        function sortBy(th, colIdx, asc) {
+            headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+            th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.cells.length > 1);
+            rows.sort((a, b) => {
+                const va = a.cells[colIdx]?.textContent.trim() ?? '';
+                const vb = b.cells[colIdx]?.textContent.trim() ?? '';
+                const cmp = va.localeCompare(vb, undefined, {numeric: true, sensitivity: 'base'});
+                return asc ? cmp : -cmp;
+            });
+            rows.forEach(r => tbody.appendChild(r));
+        }
+
+        headers.forEach((th, colIdx) => {
+            th.addEventListener('click', () => {
+                sortBy(th, colIdx, !th.classList.contains('sort-asc'));
+            });
+        });
+
+        const defCol = table.dataset.sortCol;
+        const defDir = table.dataset.sortDir ?? 'asc';
+        if (defCol !== undefined && headers[defCol]) {
+            sortBy(headers[defCol], parseInt(defCol), defDir === 'asc');
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => initSortableTables());
+document.addEventListener('htmx:afterSwap', e => initSortableTables(e.detail.elt));
+</script>
+</body>
+</html>

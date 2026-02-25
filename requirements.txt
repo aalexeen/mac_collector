@@ -1,0 +1,11 @@
+asyncpg==0.31.0
+bcrypt==3.2.2
+fastapi==0.133.0
+itsdangerous==2.2.0
+Jinja2==3.1.6
+passlib==1.7.4
+python-dotenv==1.2.1
+python-multipart==0.0.22
+starlette==0.52.1
+uuid_utils==0.14.1
+uvicorn[standard]==0.41.0

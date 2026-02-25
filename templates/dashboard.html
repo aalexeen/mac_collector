@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Search — MAC Collector{% endblock %}
+{% block content %}
+<h1>Search</h1>
+
+<div class="card">
+    <form method="get" action="/" class="inline-form">
+        <div class="form-row">
+            <label for="mac">MAC Address</label>
+            <input type="text" id="mac" name="mac" value="{{ q_mac or '' }}"
+                   placeholder="aa:bb:cc:dd:ee:ff">
+        </div>
+        <div class="form-row">
+            <label for="ip">IP Address</label>
+            <input type="text" id="ip" name="ip" value="{{ q_ip or '' }}"
+                   placeholder="192.168.1.100">
+        </div>
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary">Search</button>
+        </div>
+        {% if q_mac or q_ip %}
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <a href="/" class="btn btn-secondary">Clear</a>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+{% if results is not none %}
+<div class="card">
+    <h2>Results
+        {% if results %}({{ results|length }}){% endif %}
+    </h2>
+    {% if results %}
+    <table data-sortable data-sort-col="4" data-sort-dir="desc">
+        <thead>
+            <tr>
+                <th class="sortable">MAC</th>
+                <th class="sortable">IPs / Switch IPs</th>
+                <th class="sortable">VLANs</th>
+                <th class="sortable">Interfaces</th>
+                <th class="sortable">Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in results %}
+            <tr>
+                <td><code>{{ row.mac_address }}</code></td>
+                <td>
+                    {% if row.ip_addresses is defined %}
+                        {{ row.ip_addresses | join(', ') }}
+                    {% else %}
+                        {{ row.switch_ips | join(', ') }}
+                    {% endif %}
+                </td>
+                <td>{{ row.vlan_ids | join(', ') }}</td>
+                <td>{{ row.interfaces | join(', ') }}</td>
+                <td>{{ (row.last_seen | localdt).strftime('%Y-%m-%d %H:%M') if row.last_seen else '—' }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#888">No results found.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<h2>Change History{% if q_mac %} — <code>{{ q_mac }}</code>{% endif %}</h2>
+
+<div class="card">
+    <table data-sortable data-sort-col="0" data-sort-dir="desc">
+        <thead>
+            <tr>
+                <th class="sortable">Time</th>
+                <th class="sortable">MAC</th>
+                <th class="sortable">IP / Switch IP</th>
+                <th class="sortable">VLAN</th>
+                <th class="sortable">Interface</th>
+                <th>Changes</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in history %}
+        <tr>
+            <td style="white-space:nowrap">{{ (row.changed_at | localdt).strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td><code>{{ row.mac_address }}</code></td>
+            <td>{{ row.ip_addresses | join(', ') if row.ip_addresses else '—' }}</td>
+            <td>{{ row.vlan_ids | join(', ') if row.vlan_ids else '—' }}</td>
+            <td>{{ row.interfaces | join(', ') if row.interfaces else '—' }}</td>
+            <td>
+                {% set f = row.change_flags %}
+                {% if f == 0 %}<span class="badge badge-gone">GONE</span>
+                {% else %}
+                {% if f | bitand(4) %}<span class="badge badge-operator">IP</span> {% endif %}
+                {% if f | bitand(2) %}<span class="badge badge-viewer">VLAN</span> {% endif %}
+                {% if f | bitand(1) %}<span class="badge badge-admin">IFACE</span> {% endif %}
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="color:#888;text-align:center">No history found.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

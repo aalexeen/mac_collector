@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Users — MAC Collector{% endblock %}
+{% block content %}
+<h1>Users</h1>
+
+<div class="card">
+    <h2>Create User</h2>
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+    <form method="post" action="/users" class="inline-form">
+        <div class="form-row">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required placeholder="user@corp.local">
+        </div>
+        <div class="form-row">
+            <label for="password">Password (min 12 chars)</label>
+            <input type="password" id="password" name="password" required minlength="12">
+        </div>
+        <div class="form-row" style="flex:0 0 160px">
+            <label for="role">Role</label>
+            <select id="role" name="role">
+                <option value="viewer">Viewer</option>
+                <option value="operator">Operator</option>
+                <option value="admin">Admin</option>
+            </select>
+        </div>
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>All Users ({{ users|length }})</h2>
+    <table data-sortable data-sort-col="0" data-sort-dir="asc">
+        <thead>
+            <tr><th class="sortable">Email</th><th class="sortable">Role</th><th class="sortable">Status</th><th class="sortable">Created</th><th>Set password</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for u in users %}
+        <tr>
+            <td>{{ u.email }}</td>
+            <td>
+                {% if user.role == 'admin' and u.id|string != user.id|string %}
+                <form method="post" action="/users/{{ u.id }}/set-role" style="display:inline">
+                    <select name="role" onchange="this.form.submit()" style="width:auto;padding:.25rem .4rem;font-size:.85rem">
+                        <option value="viewer"   {% if u.role == 'viewer'   %}selected{% endif %}>viewer</option>
+                        <option value="operator" {% if u.role == 'operator' %}selected{% endif %}>operator</option>
+                        <option value="admin"    {% if u.role == 'admin'    %}selected{% endif %}>admin</option>
+                    </select>
+                </form>
+                {% else %}
+                <span class="badge badge-{{ u.role }}">{{ u.role }}</span>
+                {% endif %}
+            </td>
+            <td>
+                <span class="badge badge-{{ 'enabled' if u.enabled else 'disabled' }}">
+                    {{ 'active' if u.enabled else 'disabled' }}
+                </span>
+            </td>
+            <td>{{ (u.created_at | localdt).strftime('%Y-%m-%d') }}</td>
+            <td>
+                <form method="post" action="/users/{{ u.id }}/set-password" class="inline-form">
+                    <input type="password" name="new_password" minlength="12" required
+                           placeholder="New password" style="width:140px">
+                    <input type="password" name="confirm_password" minlength="12" required
+                           placeholder="Confirm" style="width:120px">
+                    <button type="submit" class="btn btn-secondary">Set</button>
+                </form>
+            </td>
+            <td>
+                {% if u.enabled and u.id|string != user.id|string %}
+                <form method="post" action="/users/{{ u.id }}/disable"
+                      onsubmit="return confirm('Disable {{ u.email }}?')">
+                    <button type="submit" class="btn btn-danger">Disable</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

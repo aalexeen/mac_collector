@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Switches — MAC Collector{% endblock %}
+{% block content %}
+<h1>Switches</h1>
+
+<div class="card">
+    <h2>Add Switch</h2>
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+    <form method="post" action="/switches" class="inline-form">
+        <div class="form-row">
+            <label for="ip">IP Address</label>
+            <input type="text" id="ip" name="ip" required placeholder="192.168.1.10">
+        </div>
+        <div class="form-row">
+            <label for="hostname">Hostname (optional)</label>
+            <input type="text" id="hostname" name="hostname" placeholder="sw-access-01">
+        </div>
+        <div class="form-row" style="flex:0 0 auto">
+            <label style="display:flex;align-items:center;gap:.4rem;margin-top:1.5rem">
+                <input type="checkbox" name="is_core" value="1" style="width:auto"> Core
+            </label>
+        </div>
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Active Switches ({{ switches|length }})</h2>
+    {% if switches %}
+    <table data-sortable data-sort-col="0" data-sort-dir="asc">
+        <thead>
+            <tr><th class="sortable">IP</th><th class="sortable">Hostname</th><th class="sortable">Core</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for sw in switches %}
+        <tr>
+            <td><code>{{ sw.ip_address }}</code></td>
+            <td>{{ sw.hostname or '—' }}</td>
+            <td>{{ '✓' if sw.is_core else '' }}</td>
+            <td>
+                <form method="post" action="/switches/{{ sw.id }}/delete" style="display:inline"
+                      onsubmit="return confirm('Disable switch {{ sw.ip_address }}?')">
+                    <button type="submit" class="btn btn-danger">Disable</button>
+                </form>
+                {% if user.role == 'admin' %}
+                <details style="display:inline-block;vertical-align:top">
+                    <summary class="btn btn-secondary">Edit</summary>
+                    <form method="post" action="/switches/{{ sw.id }}/edit" class="edit-form" style="margin-top:.5rem">
+                        <input type="text" name="ip" value="{{ sw.ip_address }}" required placeholder="IP" title="IP Address">
+                        <input type="text" name="hostname" value="{{ sw.hostname or '' }}" placeholder="Hostname">
+                        <label style="display:flex;align-items:center;gap:.3rem;margin:0;font-weight:normal">
+                            <input type="checkbox" name="is_core" value="1" style="width:auto"
+                                   {% if sw.is_core %}checked{% endif %}> Core
+                        </label>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </form>
+                </details>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#888">No active switches.</p>
+    {% endif %}
+</div>
+{% endblock %}

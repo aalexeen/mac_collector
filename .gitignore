@@ -1,0 +1,10 @@
+.env
+*.txt
+!requirements.txt
+__pycache__/
+.pytest_cache/
+.claude
+.playwright-mcp/
+venv/
+AGENTS.md
+GEMINI.md
