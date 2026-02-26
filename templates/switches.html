@@ -34,14 +34,18 @@
 
 <div class="card">
     <h2>Active Switches ({{ switches|length }})</h2>
+    <div style="margin-bottom:.75rem">
+        <input type="search" id="sw-search" placeholder="Search by IP or hostname…"
+               style="width:100%;max-width:360px;padding:.4rem .6rem;border:1px solid #ccc;border-radius:4px;font-size:.9rem">
+    </div>
     {% if switches %}
-    <table data-sortable data-sort-col="0" data-sort-dir="asc">
+    <table data-sortable data-sort-col="0" data-sort-dir="asc" id="sw-table">
         <thead>
             <tr><th class="sortable">IP</th><th class="sortable">Hostname</th><th class="sortable">Core</th><th>Actions</th></tr>
         </thead>
         <tbody>
         {% for sw in switches %}
-        <tr>
+        <tr data-ip="{{ sw.ip_address }}" data-hostname="{{ sw.hostname or '' }}">
             <td><code>{{ sw.ip_address }}</code></td>
             <td>{{ sw.hostname or '—' }}</td>
             <td>{{ '✓' if sw.is_core else '' }}</td>
@@ -73,4 +77,46 @@
     <p style="color:#888">No active switches.</p>
     {% endif %}
 </div>
+
+{% if disabled_switches %}
+<div class="card">
+    <h2>Disabled Switches ({{ disabled_switches|length }})</h2>
+    <table>
+        <thead>
+            <tr><th>IP</th><th>Hostname</th><th>Core</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for sw in disabled_switches %}
+        <tr style="opacity:.65">
+            <td><code>{{ sw.ip_address }}</code></td>
+            <td>{{ sw.hostname or '—' }}</td>
+            <td>{{ '✓' if sw.is_core else '' }}</td>
+            <td>
+                <form method="post" action="/switches/{{ sw.id }}/enable" style="display:inline"
+                      onsubmit="return confirm('Enable switch {{ sw.ip_address }}?')">
+                    <button type="submit" class="btn btn-primary">Enable</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<script>
+(function () {
+    var input = document.getElementById('sw-search');
+    if (!input) return;
+    input.addEventListener('input', function () {
+        var q = this.value.toLowerCase().trim();
+        var rows = document.querySelectorAll('#sw-table tbody tr');
+        rows.forEach(function (row) {
+            var ip = (row.dataset.ip || '').toLowerCase();
+            var hn = (row.dataset.hostname || '').toLowerCase();
+            row.style.display = (!q || ip.includes(q) || hn.includes(q)) ? '' : 'none';
+        });
+    });
+})();
+</script>
 {% endblock %}

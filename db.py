@@ -574,6 +574,26 @@ class Database:
                 "UPDATE switches SET enabled = false WHERE id = $1", str(switch_id)
             )
 
+    async def get_disabled_switches(self) -> list[asyncpg.Record]:
+        async with self._pool.acquire() as conn:
+            return await conn.fetch(
+                "SELECT * FROM switches WHERE enabled = false ORDER BY ip_address"
+            )
+
+    async def enable_switch(self, switch_id) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE switches SET enabled = true WHERE id = $1", str(switch_id)
+            )
+
+    async def update_switch_hostname_by_ip(self, ip: str, hostname: str) -> None:
+        """Update the hostname of an enabled switch identified by its IP address."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE switches SET hostname = $1 WHERE ip_address = $2 AND enabled = true",
+                hostname, ip,
+            )
+
     # ------------------------------------------------------------------
     # Collection log
     # ------------------------------------------------------------------

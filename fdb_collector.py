@@ -49,6 +49,7 @@ class FdbCollector:
     OID_IF_NAME     = ".1.3.6.1.2.1.31.1.1.1.1"           # ifName
     OID_TRUNK_STATE  = ".1.3.6.1.4.1.9.9.46.1.6.1.1.13"   # vlanTrunkPortDynamicState
     OID_TRUNK_STATUS = ".1.3.6.1.4.1.9.9.46.1.6.1.1.14"   # vlanTrunkPortDynamicStatus
+    OID_SYS_NAME     = ".1.3.6.1.2.1.1.5.0"               # sysName (MIB-II)
 
     # vtpVlanState value for active VLAN
     _VLAN_ACTIVE = 1
@@ -233,6 +234,21 @@ class FdbCollector:
                 access.add(ifidx)
         return access
 
+    def get_hostname(self) -> str | None:
+        """Fetch sysName (1.3.6.1.2.1.1.5.0) from the switch.
+
+        Returns the FQDN/hostname string, or None if unreachable / not set.
+        """
+        try:
+            lines = self._snmpwalk(self.OID_SYS_NAME)
+        except Exception:
+            return None
+        for line in lines:
+            for sep in (" = STRING: ", " = \""):
+                if sep in line:
+                    return line.split(sep, 1)[1].strip().strip('"') or None
+        return None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -352,9 +368,15 @@ async def _main():
             print(f"[{ip}] polling FDB table...")
             t0 = time.monotonic()
             try:
-                entries = await FdbCollector(ip).collect_async()
+                collector = FdbCollector(ip)
+                entries = await collector.collect_async()
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 print(f"[{ip}] {len(entries)} MAC entries collected ({duration_ms}ms)")
+                if db:
+                    hostname = await asyncio.to_thread(collector.get_hostname)
+                    if hostname:
+                        await db.update_switch_hostname_by_ip(ip, hostname)
+                        print(f"[{ip}] hostname updated: {hostname}")
                 return ip, entries, duration_ms
             except Exception as exc:
                 duration_ms = int((time.monotonic() - t0) * 1000)

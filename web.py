@@ -329,9 +329,10 @@ async def switches_page(
 ):
     db: Database = request.app.state.db
     switches = await db.get_switches()
+    disabled_switches = await db.get_disabled_switches()
     return templates.TemplateResponse(
         request, "switches.html",
-        {"user": user, "switches": switches, "error": None, "success": None},
+        {"user": user, "switches": switches, "disabled_switches": disabled_switches, "error": None, "success": None},
     )
 
 
@@ -351,18 +352,20 @@ async def add_switch(
     ip_err = _validate_switch_ip(ip)
     if ip_err:
         switches = await db.get_switches()
+        disabled_switches = await db.get_disabled_switches()
         return templates.TemplateResponse(
             request, "switches.html",
-            {"user": user, "switches": switches, "error": ip_err, "success": None},
+            {"user": user, "switches": switches, "disabled_switches": disabled_switches, "error": ip_err, "success": None},
             status_code=400,
         )
 
     dup = await db.check_switch_duplicate(ip, hostname)
     if dup:
         switches = await db.get_switches()
+        disabled_switches = await db.get_disabled_switches()
         return templates.TemplateResponse(
             request, "switches.html",
-            {"user": user, "switches": switches, "error": dup, "success": None},
+            {"user": user, "switches": switches, "disabled_switches": disabled_switches, "error": dup, "success": None},
             status_code=400,
         )
 
@@ -371,9 +374,10 @@ async def add_switch(
         await _log(request, user["id"], "add_switch", {"ip": ip, "hostname": hostname})
     except Exception as exc:
         switches = await db.get_switches()
+        disabled_switches = await db.get_disabled_switches()
         return templates.TemplateResponse(
             request, "switches.html",
-            {"user": user, "switches": switches, "error": f"Failed to add switch: {exc}", "success": None},
+            {"user": user, "switches": switches, "disabled_switches": disabled_switches, "error": f"Failed to add switch: {exc}", "success": None},
             status_code=500,
         )
 
@@ -397,18 +401,20 @@ async def edit_switch(
     ip_err = _validate_switch_ip(ip)
     if ip_err:
         switches = await db.get_switches()
+        disabled_switches = await db.get_disabled_switches()
         return templates.TemplateResponse(
             request, "switches.html",
-            {"user": user, "switches": switches, "error": ip_err, "success": None},
+            {"user": user, "switches": switches, "disabled_switches": disabled_switches, "error": ip_err, "success": None},
             status_code=400,
         )
 
     dup = await db.check_switch_duplicate(ip, hostname, exclude_id=switch_id)
     if dup:
         switches = await db.get_switches()
+        disabled_switches = await db.get_disabled_switches()
         return templates.TemplateResponse(
             request, "switches.html",
-            {"user": user, "switches": switches, "error": dup, "success": None},
+            {"user": user, "switches": switches, "disabled_switches": disabled_switches, "error": dup, "success": None},
             status_code=400,
         )
 
@@ -426,6 +432,18 @@ async def delete_switch(
     db: Database = request.app.state.db
     await db.delete_switch(switch_id)
     await _log(request, user["id"], "delete_switch", {"switch_id": switch_id})
+    return RedirectResponse("/switches", status_code=303)
+
+
+@app.post("/switches/{switch_id}/enable")
+async def enable_switch(
+    switch_id: str,
+    request: Request,
+    user: dict = Depends(require_operator),
+):
+    db: Database = request.app.state.db
+    await db.enable_switch(switch_id)
+    await _log(request, user["id"], "enable_switch", {"switch_id": switch_id})
     return RedirectResponse("/switches", status_code=303)
 
 

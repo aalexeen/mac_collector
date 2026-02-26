@@ -42,9 +42,10 @@ class ArpCollector:
         entries = await collector.collect_async()  # async (runs in thread)
     """
 
-    OID_ARP_MAC = ".1.3.6.1.2.1.4.22.1.2"   # ipNetToMediaPhysAddress
+    OID_ARP_MAC  = ".1.3.6.1.2.1.4.22.1.2"   # ipNetToMediaPhysAddress
     OID_ARP_TYPE = ".1.3.6.1.2.1.4.22.1.4"  # ipNetToMediaType
-    OID_IF_NAME = ".1.3.6.1.2.1.31.1.1.1.1" # ifName
+    OID_IF_NAME  = ".1.3.6.1.2.1.31.1.1.1.1" # ifName
+    OID_SYS_NAME = ".1.3.6.1.2.1.1.5.0"      # sysName (MIB-II)
 
     # ipNetToMediaType values to keep
     _KEEP_TYPES = {3, 4}  # 3=dynamic, 4=static  (skip 1=other, 2=invalid)
@@ -173,6 +174,21 @@ class ArpCollector:
                     return None
         return None
 
+    def get_hostname(self) -> str | None:
+        """Fetch sysName (1.3.6.1.2.1.1.5.0) from the switch.
+
+        Returns the FQDN/hostname string, or None if unreachable / not set.
+        """
+        try:
+            lines = self._snmpwalk(self.OID_SYS_NAME)
+        except Exception:
+            return None
+        for line in lines:
+            for sep in (" = STRING: ", " = \""):
+                if sep in line:
+                    return line.split(sep, 1)[1].strip().strip('"') or None
+        return None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -272,9 +288,15 @@ async def _main():
             print(f"[{ip}] polling ARP table...")
             t0 = time.monotonic()
             try:
-                entries = await ArpCollector(ip).collect_async()
+                collector = ArpCollector(ip)
+                entries = await collector.collect_async()
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 print(f"[{ip}] {len(entries)} MAC entries collected ({duration_ms}ms)")
+                if not args.dry_run:
+                    hostname = await asyncio.to_thread(collector.get_hostname)
+                    if hostname:
+                        await db.update_switch_hostname_by_ip(ip, hostname)
+                        print(f"[{ip}] hostname updated: {hostname}")
 
                 if args.dry_run:
                     for e in entries:
