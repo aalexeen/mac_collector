@@ -614,6 +614,70 @@ async def admin_set_password(
 # Audit log (admin)
 # ------------------------------------------------------------------
 
+COLLECTOR_PAGE_SIZES = [50, 100, 200, 500]
+
+
+@app.get("/collector-logs", response_class=HTMLResponse)
+async def collector_logs_page(
+    request: Request,
+    collector: str = "",
+    switch_ip: str = "",
+    since: str = "",
+    until: str = "",
+    errors_only: str = "",
+    offset: int = 0,
+    limit: int = 50,
+    user: dict = Depends(require_operator),
+):
+    db: Database = request.app.state.db
+    if limit not in COLLECTOR_PAGE_SIZES:
+        limit = 50
+
+    since_dt = None
+    until_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    if until:
+        try:
+            until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    entries = await db.get_collection_log(
+        collector=collector or None,
+        switch_ip=switch_ip.strip() or None,
+        since=since_dt,
+        until=until_dt,
+        errors_only=bool(errors_only),
+        limit=limit + 1,
+        offset=offset,
+    )
+    has_more = len(entries) > limit
+    entries = entries[:limit]
+    total_hint = offset + len(entries) + (1 if has_more else 0)
+
+    return templates.TemplateResponse(
+        request, "collector_logs.html",
+        {
+            "user": user,
+            "entries": entries,
+            "page_sizes": COLLECTOR_PAGE_SIZES,
+            "q_collector": collector or None,
+            "q_switch_ip": switch_ip.strip() or None,
+            "q_since": since or None,
+            "q_until": until or None,
+            "q_errors_only": bool(errors_only),
+            "offset": offset,
+            "limit": limit,
+            "has_more": has_more,
+            "total": total_hint,
+        },
+    )
+
+
 AUDIT_PAGE_SIZES = [50, 100, 200, 500]
 
 

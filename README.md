@@ -28,6 +28,12 @@ ARP table (ipNetToMediaTable)                  FDB table (BRIDGE-MIB + community
                     |                     |
                auth / session        audit_log
                (users table)         (partitioned)
+
+Both collectors write to:
++------------------+
+| collection_log   |  one row per switch per run: duration, MAC counts, errors
+| (partitioned)    |
++------------------+
 ```
 
 **Core switch** — ARP table provides MAC + IP + VLAN + interface mapping.
@@ -47,7 +53,7 @@ The installer:
 - Installs application to `/opt/mac-collector/`
 - Creates Python virtualenv and installs dependencies
 - Copies config to `/etc/mac-collector/.env`
-- Applies `schema.sql` and `schema_auth.sql` if the database is not yet initialized
+- Applies `schema.sql` if the database is not yet initialized
 - Installs and enables systemd services
 
 ```
@@ -101,9 +107,8 @@ sudo apt install snmp postgresql-client   # Debian/Ubuntu
 sudo -u postgres psql -c "CREATE USER mac_collector_user WITH PASSWORD 'your_password';"
 sudo -u postgres psql -c "CREATE DATABASE mac_collector OWNER mac_collector_user;"
 
-# Apply schemas in order
+# Apply schema (network tables, auth tables, collection_log, partitions)
 psql -U mac_collector_user -d mac_collector -f schema.sql
-psql -U mac_collector_user -d mac_collector -f schema_auth.sql
 ```
 
 ### Python environment
@@ -131,6 +136,9 @@ SESSION_SECRET=$(openssl rand -hex 32)
 
 # Optional: timezone for web UI display (default: America/New_York)
 DISPLAY_TZ=America/New_York
+
+# Optional: max simultaneous FDB switch polls (default: 10)
+FDB_CONCURRENCY=10
 ```
 
 ### Create first admin user
@@ -155,7 +163,7 @@ Open http://localhost:8000 — you will be redirected to the login page.
 | Role | Capabilities |
 |------|-------------|
 | **viewer** | Search MAC/IP, view change history, browse MACs on Switches (read-only) |
-| **operator** | viewer + add/delete switches, trigger on-demand FDB update |
+| **operator** | viewer + add/delete switches, trigger on-demand FDB update, view collector logs |
 | **admin** | operator + manage users (create, disable, set role, reset password) + view audit log |
 
 ### Pages
@@ -165,6 +173,7 @@ Open http://localhost:8000 — you will be redirected to the login page.
 | Search | `/` | viewer | Search by MAC or IP address; shows current location and change history |
 | MACs on Switches | `/mac-on-switches` | viewer | Browse all MACs learned on a selected switch |
 | Switches | `/switches` | operator | Switch registry — add, edit, delete switches |
+| Collector Logs | `/collector-logs` | operator | Per-switch poll history: duration, MAC counts, errors |
 | Users | `/users` | admin | User management |
 | Audit Log | `/audit` | admin | Filterable, searchable, paginated audit trail |
 | Profile | `/profile` | viewer | Change own password |
@@ -190,6 +199,7 @@ Open http://localhost:8000 — you will be redirected to the login page.
 | POST | `/users/{id}/set-role` | admin | Change user role |
 | POST | `/users/{id}/set-password` | admin | Reset user password |
 | GET | `/profile` | viewer+ | Change own password |
+| GET | `/collector-logs` | operator+ | Collector poll history with filters, pagination |
 | GET | `/audit` | admin | Audit log with filters, search, pagination |
 
 `/search` and `/history` redirect to `/` (301).
@@ -203,6 +213,18 @@ The **MACs on Switches** page (`/mac-on-switches`) shows the current MAC address
 - Table sorts by interface by default (natural sort: Fa1/0/1 before Fa1/0/10).
 - MACs that disappeared from the switch since the last collection appear as `GONE` entries in the change history.
 
+### Collector Logs features
+
+The **Collector Logs** page (`/collector-logs`) shows the result of every SNMP poll run:
+
+- Filter by **collector type** (FDB / ARP), **switch IP** (partial match), **date range**, and **Errors only** toggle.
+- **Duration** column shows wall-clock time of the SNMP poll (formatted as `Xms` or `X.Xs`).
+- **Changed** / **Gone** counts are highlighted in bold when non-zero; Gone is shown in red.
+- **Status** column: green **OK** badge on success, red **ERROR** badge with the first 60 characters of the error message (full message in tooltip) on failure.
+- Errors are raised when `snmpwalk` exits non-zero with a non-empty stderr (timeout, no route to host, auth failure). An empty FDB/ARP table on a reachable switch is not an error.
+- **Per-page** dropdown: 50 / 100 / 200 / 500 entries.
+- Paginated with Prev / Next navigation.
+
 ### Audit Log features
 
 - Filter by **action type**, **date range** (From / Until), and free-text **search** (matches any field: user, action, IP, detail, timestamp — using PostgreSQL `ILIKE`).
@@ -215,7 +237,7 @@ All tables support client-side column sorting:
 - Click any column header to sort ascending; click again to reverse.
 - Sort arrows: ⇅ (unsorted), ▲ (asc), ▼ (desc).
 - **Natural sort order** — interface names sort correctly (Fa1/0/1, Fa1/0/2, ..., Fa1/0/10).
-- Default sort per page: Search (date desc), MACs on Switches (interface asc), Switches (IP asc), Users (email asc), Audit Log (time desc).
+- Default sort per page: Search (date desc), MACs on Switches (interface asc), Switches (IP asc), Users (email asc), Collector Logs (time desc), Audit Log (time desc).
 - HTMX-loaded tables (MACs on Switches partial) are re-initialized automatically on `htmx:afterSwap`.
 
 ### Timezone display
@@ -256,7 +278,7 @@ When adding or editing a switch, the IP address is validated with Python's `ipad
 
 ## Database Schema
 
-All network tables in `schema.sql`, auth tables in `schema_auth.sql`. Both use a single `BEGIN / COMMIT` transaction.
+All tables are in `schema.sql` in a single `BEGIN / COMMIT` transaction.
 
 **Current state tables** (`arp_core`, `mac_current`) — one row per MAC, arrays for multi-value fields (handles loops):
 
@@ -267,7 +289,7 @@ vlan_ids:     {100, 200}
 interfaces:   {Gi1/0/5, Gi2/0/10}
 ```
 
-**Change log tables** (`arp_changes`, `mac_changes`, `audit_log`) — partitioned by week, never deleted. Written only when topology changes:
+**Change log tables** (`arp_changes`, `mac_changes`) — partitioned by week, never deleted. Written only when topology changes:
 
 | change_flags | What changed |
 |--------------|--------------|
@@ -277,6 +299,18 @@ interfaces:   {Gi1/0/5, Gi2/0/10}
 | 1 | Only interface |
 | 0 | MAC disappeared from switch (GONE) |
 
+**Operational log table** (`collection_log`) — one row per switch per poll run, partitioned by week, never deleted:
+
+| Column | Description |
+|--------|-------------|
+| `collector` | `'fdb'` or `'arp'` |
+| `switch_ip` | Switch management IP |
+| `duration_ms` | Wall-clock time of the SNMP poll |
+| `macs_total` | Entries returned by the collector (`NULL` on error) |
+| `macs_changed` | New + topology-changed MACs written to DB |
+| `macs_gone` | MACs that disappeared since last poll (FDB only) |
+| `error` | `NULL` = success; error message from `snmpwalk` stderr otherwise |
+
 **Auth tables** (`users`, `audit_log`):
 
 | Table | Description |
@@ -284,7 +318,7 @@ interfaces:   {Gi1/0/5, Gi2/0/10}
 | `users` | Email + bcrypt password + role (admin/operator/viewer) + enabled flag |
 | `audit_log` | Every user action, partitioned by week, never deleted |
 
-**Partitioning:** weekly partitions created automatically via `create_weekly_partitions()`. On startup, the web app calls `ensure_partitions(4)` to create 4 weeks ahead.
+**Partitioning:** weekly partitions created automatically via `create_weekly_partitions()`. On startup, the web app calls `ensure_partitions(4)` to create 4 weeks ahead. All partitioned tables: `arp_changes`, `mac_changes`, `collection_log`, `audit_log`.
 
 **Primary keys:** UUID v7 (RFC 9562) generated application-side. Time-ordered for B-tree index locality.
 
@@ -308,6 +342,28 @@ Ports are classified using Cisco VTP MIB:
 | desirable (3) / auto (4) | notTrunking (2) | **ACCESS** |
 
 Only MAC addresses learned on ACCESS ports are collected.
+
+## FDB Collector Concurrency
+
+`fdb_collector` polls all access switches in parallel using `asyncio.gather` + `asyncio.Semaphore`. The semaphore limits simultaneous SNMP polls to avoid overloading the network.
+
+```
+switch_ips = [sw1, sw2, ..., swN]
+          |
+    asyncio.gather()          ← all N tasks submitted at once
+          |
+    Semaphore(10)             ← at most 10 running simultaneously
+    /    |    \   ...
+  sw1   sw2   sw3            ← each runs collect_async() in a thread
+```
+
+Configure via environment variable:
+
+```bash
+FDB_CONCURRENCY=10   # default; increase for faster polling of 20–40 switches
+```
+
+Each poll result is logged to `collection_log` independently — a timeout on one switch does not affect the others.
 
 ## Standalone Diagnostic Scripts
 

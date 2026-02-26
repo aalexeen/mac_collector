@@ -95,6 +95,9 @@ class Database:
             await conn.fetchval(
                 "SELECT create_weekly_partitions('audit_log', $1)", weeks_ahead
             )
+            await conn.fetchval(
+                "SELECT create_weekly_partitions('collection_log', $1)", weeks_ahead
+            )
 
     # ------------------------------------------------------------------
     # Switches
@@ -153,9 +156,15 @@ class Database:
     # ARP core (Process 1)
     # ------------------------------------------------------------------
 
-    async def upsert_arp(self, entries: list[ArpEntry]):
+    async def upsert_arp(self, entries: list[ArpEntry]) -> tuple[int, int]:
+        """Upsert ARP entries. Returns (changed, gone) counts.
+
+        changed — new MACs inserted + existing MACs whose topology changed.
+        gone    — always 0 (ARP table has no gone detection).
+        """
         if not entries:
-            return
+            return 0, 0
+        changed = 0
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 for entry in entries:
@@ -170,6 +179,7 @@ class Database:
 
                     if row is None:
                         # New MAC
+                        changed += 1
                         await conn.execute(
                             """INSERT INTO arp_core
                                (id, mac_address, ip_addresses, vlan_ids, interfaces, topology_hash)
@@ -183,6 +193,7 @@ class Database:
                         )
                     elif row["topology_hash"] != new_hash:
                         # Changed — log and update
+                        changed += 1
                         flags = 0
                         if _to_str_list(entry.ip_addresses) != _to_str_list(row["ip_addresses"]):
                             flags |= FLAG_IP
@@ -220,20 +231,27 @@ class Database:
                                WHERE mac_address = $1""",
                             entry.mac_address,
                         )
+        return changed, 0
 
     # ------------------------------------------------------------------
     # MAC current (Process 2)
     # ------------------------------------------------------------------
 
-    async def upsert_macs(self, entries: list[MacEntry], switch_ip: str | None = None):
+    async def upsert_macs(self, entries: list[MacEntry], switch_ip: str | None = None) -> tuple[int, int]:
         """Upsert FDB entries and detect disappeared MACs.
 
         switch_ip must be provided to enable disappearance detection.
         MACs previously seen on switch_ip but absent from entries are recorded
         in mac_changes with FLAG_GONE=0 and removed from mac_current.
+
+        Returns (changed, gone) counts:
+          changed — new MACs inserted + existing MACs whose topology changed.
+          gone    — MACs that disappeared from this switch since last poll.
         """
         if not entries and not switch_ip:
-            return
+            return 0, 0
+        changed = 0
+        gone = 0
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 # --- disappearance detection ---
@@ -250,6 +268,7 @@ class Database:
                         if mac.lower() in new_macs:
                             continue
                         # Record disappearance with last-known state
+                        gone += 1
                         await conn.execute(
                             """INSERT INTO mac_changes
                                (id, mac_address, switch_ips, vlan_ids, interfaces, change_flags)
@@ -288,6 +307,7 @@ class Database:
                     )
 
                     if row is None:
+                        changed += 1
                         await conn.execute(
                             """INSERT INTO mac_current
                                (id, mac_address, switch_ips, vlan_ids, interfaces, topology_hash)
@@ -300,6 +320,7 @@ class Database:
                             new_hash,
                         )
                     elif row["topology_hash"] != new_hash:
+                        changed += 1
                         flags = 0
                         if _to_str_list(entry.switch_ips) != _to_str_list(row["switch_ips"]):
                             flags |= FLAG_IP
@@ -336,6 +357,7 @@ class Database:
                                WHERE mac_address = $1""",
                             entry.mac_address,
                         )
+        return changed, gone
 
     # ------------------------------------------------------------------
     # Users
@@ -550,4 +572,78 @@ class Database:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE switches SET enabled = false WHERE id = $1", str(switch_id)
+            )
+
+    # ------------------------------------------------------------------
+    # Collection log
+    # ------------------------------------------------------------------
+
+    async def get_collection_log(
+        self,
+        *,
+        collector: str | None = None,
+        switch_ip: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        errors_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[asyncpg.Record]:
+        conditions: list[str] = []
+        args: list = []
+        idx = 1
+
+        if collector:
+            conditions.append(f"collector = ${idx}")
+            args.append(collector)
+            idx += 1
+        if switch_ip:
+            conditions.append(f"switch_ip::text ILIKE ${idx}")
+            args.append(f"%{switch_ip}%")
+            idx += 1
+        if since is not None:
+            conditions.append(f"polled_at >= ${idx}")
+            args.append(since)
+            idx += 1
+        if until is not None:
+            conditions.append(f"polled_at <= ${idx}")
+            args.append(until)
+            idx += 1
+        if errors_only:
+            conditions.append("error IS NOT NULL")
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = f"""
+            SELECT id, polled_at, collector, switch_ip,
+                   duration_ms, macs_total, macs_changed, macs_gone, error
+            FROM collection_log
+            {where}
+            ORDER BY polled_at DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+        """
+        args.extend([limit, offset])
+        async with self._pool.acquire() as conn:
+            return await conn.fetch(sql, *args)
+
+    async def log_collection(
+        self,
+        *,
+        collector: str,
+        switch_ip: str,
+        duration_ms: int,
+        macs_total: int | None = None,
+        macs_changed: int = 0,
+        macs_gone: int = 0,
+        error: str | None = None,
+    ) -> None:
+        """Write one row to collection_log. Always uses a separate connection
+        so a DB error here never rolls back the collector's own transaction."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO collection_log
+                   (id, collector, switch_ip, duration_ms,
+                    macs_total, macs_changed, macs_gone, error)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                _uuid7(), collector, switch_ip, duration_ms,
+                macs_total, macs_changed, macs_gone, error,
             )

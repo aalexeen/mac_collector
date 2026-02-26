@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Collector Logs — MAC Collector{% endblock %}
+{% block content %}
+<h1>Collector Logs</h1>
+
+<div class="card">
+    <form method="get" action="/collector-logs" class="inline-form">
+        <div class="form-row" style="flex:0 0 130px">
+            <label for="collector">Collector</label>
+            <select id="collector" name="collector">
+                <option value="">All</option>
+                <option value="fdb" {% if q_collector == 'fdb' %}selected{% endif %}>FDB (access)</option>
+                <option value="arp" {% if q_collector == 'arp' %}selected{% endif %}>ARP (core)</option>
+            </select>
+        </div>
+        <div class="form-row" style="flex:1 1 160px">
+            <label for="switch_ip">Switch IP</label>
+            <input type="text" id="switch_ip" name="switch_ip"
+                   value="{{ q_switch_ip or '' }}" placeholder="192.168.1…">
+        </div>
+        <div class="form-row" style="flex:0 0 160px">
+            <label for="since">From</label>
+            <input type="date" id="since" name="since" value="{{ q_since or '' }}">
+        </div>
+        <div class="form-row" style="flex:0 0 160px">
+            <label for="until">Until</label>
+            <input type="date" id="until" name="until" value="{{ q_until or '' }}">
+        </div>
+        <div class="form-row" style="flex:0 0 auto; align-self:flex-end; padding-bottom:.45rem">
+            <label style="display:flex;align-items:center;gap:.4rem;font-weight:normal;cursor:pointer">
+                <input type="checkbox" name="errors_only" value="1"
+                       {% if q_errors_only %}checked{% endif %}
+                       style="width:auto">
+                Errors only
+            </label>
+        </div>
+        <div class="form-row" style="flex:0 0 100px">
+            <label for="limit">Per page</label>
+            <select id="limit" name="limit">
+                {% for s in page_sizes %}
+                <option value="{{ s }}" {% if s == limit %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn btn-primary">Filter</button>
+        </div>
+        {% if q_collector or q_switch_ip or q_since or q_until or q_errors_only %}
+        <div class="form-row" style="flex:0">
+            <label>&nbsp;</label>
+            <a href="/collector-logs" class="btn btn-secondary">Clear</a>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card">
+    <table data-sortable data-sort-col="0" data-sort-dir="desc">
+        <thead>
+            <tr>
+                <th class="sortable">Time</th>
+                <th class="sortable">Collector</th>
+                <th class="sortable">Switch IP</th>
+                <th class="sortable" style="text-align:right">Duration</th>
+                <th class="sortable" style="text-align:right">Total</th>
+                <th class="sortable" style="text-align:right">Changed</th>
+                <th class="sortable" style="text-align:right">Gone</th>
+                <th class="sortable">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in entries %}
+        <tr>
+            <td style="white-space:nowrap">
+                {{ (row.polled_at | localdt).strftime('%Y-%m-%d %H:%M:%S') }}
+            </td>
+            <td>
+                <span class="badge {% if row.collector == 'fdb' %}badge-operator{% else %}badge-admin{% endif %}">
+                    {{ row.collector | upper }}
+                </span>
+            </td>
+            <td><code>{{ row.switch_ip }}</code></td>
+            <td style="text-align:right;color:#666">
+                {% if row.duration_ms is not none %}
+                    {% if row.duration_ms >= 1000 %}
+                        {{ "%.1f"|format(row.duration_ms / 1000) }}s
+                    {% else %}
+                        {{ row.duration_ms }}ms
+                    {% endif %}
+                {% else %}—{% endif %}
+            </td>
+            <td style="text-align:right">{{ row.macs_total if row.macs_total is not none else '—' }}</td>
+            <td style="text-align:right">
+                {% if row.macs_changed %}
+                    <strong>{{ row.macs_changed }}</strong>
+                {% else %}
+                    {{ row.macs_changed }}
+                {% endif %}
+            </td>
+            <td style="text-align:right">
+                {% if row.macs_gone %}
+                    <strong style="color:#c0392b">{{ row.macs_gone }}</strong>
+                {% else %}
+                    {{ row.macs_gone }}
+                {% endif %}
+            </td>
+            <td>
+                {% if row.error %}
+                    <span class="badge badge-disabled" title="{{ row.error }}">ERROR</span>
+                    <span style="font-size:.8rem;color:#888;margin-left:.4rem">
+                        {{ row.error[:60] }}{% if row.error|length > 60 %}…{% endif %}
+                    </span>
+                {% else %}
+                    <span class="badge badge-enabled">OK</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="color:#888;text-align:center">No entries found.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total > 0 %}
+    {% set base_qs %}collector={{ q_collector or '' }}&switch_ip={{ q_switch_ip or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&errors_only={{ '1' if q_errors_only else '' }}&limit={{ limit }}{% endset %}
+    <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center">
+        {% if offset > 0 %}
+        <a href="/collector-logs?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}"
+           class="btn btn-secondary">← Prev</a>
+        {% endif %}
+        <span style="font-size:.85rem;color:#888">
+            {{ offset + 1 }}–{{ offset + entries|length }}{% if has_more %}&plus;{% endif %}
+        </span>
+        {% if has_more %}
+        <a href="/collector-logs?{{ base_qs }}&offset={{ offset + limit }}"
+           class="btn btn-secondary">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

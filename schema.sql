@@ -176,11 +176,32 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
+-- Collection log: one row per switch per poll run
+-- ============================================================
+CREATE TABLE IF NOT EXISTS collection_log (
+    id           UUID,                            -- _uuid7() from Python
+    polled_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    collector    TEXT        NOT NULL,             -- 'fdb' | 'arp'
+    switch_ip    INET        NOT NULL,
+    duration_ms  INT,                             -- SNMP poll wall-clock time
+    macs_total   INT,                             -- entries returned by collector (NULL on error)
+    macs_changed INT         NOT NULL DEFAULT 0,  -- new + topology-changed MACs
+    macs_gone    INT         NOT NULL DEFAULT 0,  -- MACs that disappeared (fdb only)
+    error        TEXT                             -- NULL = success
+) PARTITION BY RANGE (polled_at);
+
+CREATE INDEX IF NOT EXISTS idx_collection_log_polled_at ON collection_log(polled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_log_switch_ip ON collection_log(switch_ip);
+CREATE INDEX IF NOT EXISTS idx_collection_log_error     ON collection_log(error)
+    WHERE error IS NOT NULL;
+
+-- ============================================================
 -- Create initial partitions (current week + 4 weeks ahead)
 -- ============================================================
-SELECT create_weekly_partitions('arp_changes', 4);
-SELECT create_weekly_partitions('mac_changes', 4);
-SELECT create_weekly_partitions('audit_log',   4);
+SELECT create_weekly_partitions('arp_changes',     4);
+SELECT create_weekly_partitions('mac_changes',     4);
+SELECT create_weekly_partitions('audit_log',       4);
+SELECT create_weekly_partitions('collection_log',  4);
 
 -- ============================================================
 -- Seed core switch

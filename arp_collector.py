@@ -20,6 +20,7 @@ invalid (type=2) and other (type=1) entries are skipped.
 import asyncio
 import os
 import subprocess
+import time
 from collections import defaultdict
 
 try:
@@ -70,6 +71,7 @@ class ArpCollector:
         Raises:
             FileNotFoundError:        snmpwalk binary not found.
             subprocess.TimeoutExpired: switch unreachable or slow.
+            RuntimeError:             snmpwalk exited non-zero (timeout, no route, auth failure).
         """
         result = subprocess.run(
             ["snmpwalk", "-v2c", "-c", self.community, self.ip, oid],
@@ -77,9 +79,13 @@ class ArpCollector:
             text=True,
             timeout=self.timeout,
         )
-        if not result.stdout.strip():
-            return []
-        return result.stdout.strip().split("\n")
+        if result.stdout.strip():
+            return result.stdout.strip().split("\n")
+        # Empty stdout — distinguish real failure (returncode≠0 + stderr) from
+        # an empty OID tree on a reachable switch (returncode=0, stderr="").
+        if result.returncode != 0 and result.stderr.strip():
+            raise RuntimeError(result.stderr.strip().splitlines()[0])
+        return []
 
     # ------------------------------------------------------------------
     # Parsers
@@ -264,19 +270,34 @@ async def _main():
 
         for ip in switch_ips:
             print(f"[{ip}] polling ARP table...")
-            collector = ArpCollector(ip)
-            entries = await collector.collect_async()
-            print(f"[{ip}] {len(entries)} MAC entries collected")
+            t0 = time.monotonic()
+            try:
+                entries = await ArpCollector(ip).collect_async()
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                print(f"[{ip}] {len(entries)} MAC entries collected ({duration_ms}ms)")
 
-            if args.dry_run:
-                for e in entries:
-                    vlans = ",".join(str(v) for v in e.vlan_ids)
-                    ifaces = ",".join(e.interfaces)
-                    ips = ",".join(e.ip_addresses)
-                    print(f"  {e.mac_address} | {ips} | vlan={vlans} | {ifaces}")
-            else:
-                await db.upsert_arp(entries)
-                print(f"[{ip}] upsert_arp done")
+                if args.dry_run:
+                    for e in entries:
+                        vlans = ",".join(str(v) for v in e.vlan_ids)
+                        ifaces = ",".join(e.interfaces)
+                        ips = ",".join(e.ip_addresses)
+                        print(f"  {e.mac_address} | {ips} | vlan={vlans} | {ifaces}")
+                else:
+                    changed, _ = await db.upsert_arp(entries)
+                    await db.log_collection(
+                        collector="arp", switch_ip=ip,
+                        duration_ms=duration_ms, macs_total=len(entries),
+                        macs_changed=changed,
+                    )
+                    print(f"[{ip}] upsert done (changed={changed})")
+            except Exception as exc:
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                print(f"[{ip}] ERROR: {exc}")
+                if not args.dry_run:
+                    await db.log_collection(
+                        collector="arp", switch_ip=ip,
+                        duration_ms=duration_ms, error=str(exc),
+                    )
     finally:
         await db.close()
 

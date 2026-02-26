@@ -20,6 +20,7 @@ Only MAC addresses learned on ACCESS ports are collected; trunk port MACs
 import asyncio
 import os
 import subprocess
+import time
 from collections import defaultdict
 
 try:
@@ -80,6 +81,7 @@ class FdbCollector:
         Raises:
             FileNotFoundError:        snmpwalk binary not found.
             subprocess.TimeoutExpired: switch unreachable or slow.
+            RuntimeError:             snmpwalk exited non-zero (timeout, no route, auth failure).
         """
         community = f"{self.community}@{vlan}" if vlan is not None else self.community
         result = subprocess.run(
@@ -88,9 +90,13 @@ class FdbCollector:
             text=True,
             timeout=self.timeout,
         )
-        if not result.stdout.strip():
-            return []
-        return result.stdout.strip().split("\n")
+        if result.stdout.strip():
+            return result.stdout.strip().split("\n")
+        # Empty stdout — distinguish real failure (returncode≠0 + stderr) from
+        # an empty OID tree on a reachable switch (returncode=0, stderr="").
+        if result.returncode != 0 and result.stderr.strip():
+            raise RuntimeError(result.stderr.strip().splitlines()[0])
+        return []
 
     # ------------------------------------------------------------------
     # Parsers
@@ -336,21 +342,54 @@ async def _main():
                 return
             switch_ips = [str(sw["ip_address"]) for sw in switches]
 
-    try:
-        for ip in switch_ips:
-            print(f"[{ip}] polling FDB table...")
-            collector = FdbCollector(ip)
-            entries = await collector.collect_async()
-            print(f"[{ip}] {len(entries)} MAC entries collected")
+    # Limit simultaneous SNMP polls; tune via FDB_CONCURRENCY env var.
+    concurrency = int(os.environ.get("FDB_CONCURRENCY", "10"))
+    sem = asyncio.Semaphore(concurrency)
+    print(f"Polling {len(switch_ips)} switch(es), concurrency={concurrency}")
 
+    async def poll_one(ip: str) -> tuple[str, list | Exception, int]:
+        async with sem:
+            print(f"[{ip}] polling FDB table...")
+            t0 = time.monotonic()
+            try:
+                entries = await FdbCollector(ip).collect_async()
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                print(f"[{ip}] {len(entries)} MAC entries collected ({duration_ms}ms)")
+                return ip, entries, duration_ms
+            except Exception as exc:
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                print(f"[{ip}] ERROR: {exc}")
+                return ip, exc, duration_ms
+
+    try:
+        results = await asyncio.gather(*(poll_one(ip) for ip in switch_ips))
+
+        failed = 0
+        for ip, result, duration_ms in results:
+            if isinstance(result, Exception):
+                failed += 1
+                if db:
+                    await db.log_collection(
+                        collector="fdb", switch_ip=ip,
+                        duration_ms=duration_ms, error=str(result),
+                    )
+                continue
             if args.dry_run:
-                for e in entries:
+                for e in result:
                     vlans  = ",".join(str(v) for v in e.vlan_ids)
                     ifaces = ",".join(e.interfaces)
                     print(f"  {e.mac_address} | switch={e.switch_ips} | vlan={vlans} | {ifaces}")
             else:
-                await db.upsert_macs(entries, switch_ip=ip)
-                print(f"[{ip}] upsert_macs done")
+                changed, gone = await db.upsert_macs(result, switch_ip=ip)
+                await db.log_collection(
+                    collector="fdb", switch_ip=ip,
+                    duration_ms=duration_ms, macs_total=len(result),
+                    macs_changed=changed, macs_gone=gone,
+                )
+                print(f"[{ip}] upsert done (changed={changed}, gone={gone})")
+
+        if failed:
+            print(f"WARNING: {failed}/{len(switch_ips)} switch(es) failed")
     finally:
         if db:
             await db.close()

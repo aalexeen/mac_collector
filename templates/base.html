@@ -69,7 +69,10 @@
     <span class="brand">MAC Collector</span>
     <a href="/">Search</a>
     <a href="/mac-on-switches">MACs on Switches</a>
-    {% if user.role in ('operator', 'admin') %}<a href="/switches">Switches</a>{% endif %}
+    {% if user.role in ('operator', 'admin') %}
+        <a href="/switches">Switches</a>
+        <a href="/collector-logs">Collector Logs</a>
+    {% endif %}
     {% if user.role == 'admin' %}
         <a href="/users">Users</a>
         <a href="/audit">Audit</a>
