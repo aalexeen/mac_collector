@@ -99,6 +99,39 @@ def _normalize_mac(mac: str) -> str | None:
     return ":".join(pairs)
 
 
+def _normalize_ip(ip: str) -> str | None:
+    """Validate and normalize an IP address string.
+
+    Returns canonical IP string if valid, None otherwise.
+
+    Examples:
+      192.168.1.1    -> '192.168.1.1'
+      10.47.2.13065  -> None  (invalid)
+      xyz            -> None  (invalid)
+    """
+    try:
+        return str(ipaddress.ip_address(ip.strip()))
+    except ValueError:
+        return None
+
+
+def _normalize_vlan(vlan: str) -> int | None:
+    """Parse and validate a VLAN id string.
+
+    Returns int in range 1–4094 if valid, None otherwise.
+
+    Examples:
+      '100'   -> 100
+      '5000'  -> None  (out of range)
+      'xyz'   -> None  (not a number)
+    """
+    try:
+        v = int(vlan.strip())
+    except ValueError:
+        return None
+    return v if 1 <= v <= 4094 else None
+
+
 def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
@@ -279,14 +312,24 @@ async def search(
     if raw_mac and mac is None:
         mac_error = f"MAC address field contains gibberish: '{raw_mac}'"
         mac = ""
-    ip = ip.strip()
+    ip_raw = ip.strip()
+    ip_error: str | None = None
+    ip_valid: str = ""
+    if ip_raw:
+        ip_valid = _normalize_ip(ip_raw) or ""
+        if not ip_valid:
+            ip_error = f"'{ip_raw}' is not a valid IP address"
+    ip = ip_valid  # for display / q_ip
+
     interface = interface.strip()
+
     vlan_int: int | None = None
+    vlan_error: str | None = None
     if vlan.strip():
-        try:
-            vlan_int = int(vlan.strip())
-        except ValueError:
-            pass
+        vlan_int = _normalize_vlan(vlan.strip())
+        if vlan_int is None:
+            vlan_error = f"'{vlan.strip()}' is not a valid VLAN (must be 1–4094)"
+
     changes_int: int | None = None
     if changes.strip():
         try:
@@ -302,13 +345,13 @@ async def search(
     if mac:
         results = await db.search_by_mac(mac)
         await _log(request, user["id"], "search_mac", {"query": mac})
-    elif ip:
-        results = await db.search_by_ip(ip)
-        await _log(request, user["id"], "search_ip", {"query": ip})
+    elif ip_valid:
+        results = await db.search_by_ip(ip_valid)
+        await _log(request, user["id"], "search_ip", {"query": ip_valid})
 
     history = await db.get_history(
         mac=mac or None,
-        switch_ip=ip or None,
+        switch_ip=ip_valid or None,
         since=since_dt,
         until=until_dt,
         vlan=vlan_int,
@@ -321,8 +364,8 @@ async def search(
     history = history[:limit]
     total_hint = offset + len(history) + (1 if has_more else 0)
 
-    if mac or ip:
-        await _log(request, user["id"], "view_history", {"mac": mac or None, "ip": ip or None})
+    if mac or ip_valid:
+        await _log(request, user["id"], "view_history", {"mac": mac or None, "ip": ip_valid or None})
 
     return templates.TemplateResponse(
         request, "dashboard.html",
@@ -330,9 +373,11 @@ async def search(
             "user": user,
             "results": results,
             "mac_error": mac_error,
+            "ip_error": ip_error,
+            "vlan_error": vlan_error,
             "q_mac": mac or None,
             "q_ip": ip or None,
-            "q_vlan": vlan.strip() or "",
+            "q_vlan": str(vlan_int) if vlan_int is not None else "",
             "q_interface": interface or "",
             "q_changes": changes.strip() or "",
             "q_range": active_preset or "",
