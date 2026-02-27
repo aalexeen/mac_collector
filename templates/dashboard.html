@@ -116,6 +116,12 @@
 {% if mac_error %}
 <div class="alert alert-error">{{ mac_error }}</div>
 {% endif %}
+{% if ip_error %}
+<div class="alert alert-error">{{ ip_error }}</div>
+{% endif %}
+{% if vlan_error %}
+<div class="alert alert-error">{{ vlan_error }}</div>
+{% endif %}
 
 {% if results is not none %}
 <div class="card">
