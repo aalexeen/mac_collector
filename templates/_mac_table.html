@@ -8,7 +8,12 @@
         {% if macs %}({{ macs|length }}){% endif %}
     </h2>
     {% if macs %}
-    <table data-sortable data-sort-col="2" data-sort-dir="asc">
+    <div style="margin-bottom:.75rem">
+        <input type="search" id="mac-filter" placeholder="Filter by MAC, VLAN, interface…"
+               style="width:100%;max-width:380px;padding:.35rem .6rem;font-size:.9rem;
+                      border:1px solid #ccc;border-radius:4px;box-sizing:border-box">
+    </div>
+    <table data-sortable data-sort-col="2" data-sort-dir="asc" id="mac-filter-table">
         <thead>
             <tr>
                 <th class="sortable">MAC</th>
@@ -28,6 +33,19 @@
         {% endfor %}
         </tbody>
     </table>
+    <script>
+    (function () {
+        const input = document.getElementById('mac-filter');
+        const tbody = document.querySelector('#mac-filter-table tbody');
+        if (!input || !tbody) return;
+        input.addEventListener('input', function () {
+            const q = this.value.toLowerCase().replace(/[:.]/g, '');
+            for (const tr of tbody.rows) {
+                tr.hidden = q && !tr.textContent.toLowerCase().replace(/[:.]/g, '').includes(q);
+            }
+        });
+    })();
+    </script>
     {% elif not error %}
     <p style="color:#888">No MAC addresses found for this switch.</p>
     {% endif %}

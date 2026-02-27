@@ -88,6 +88,10 @@
 })();
 </script>
 
+{% if mac_error %}
+<div class="alert alert-error">{{ mac_error }}</div>
+{% endif %}
+
 {% if results is not none %}
 <div class="card">
     <h2>Results

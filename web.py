@@ -66,6 +66,39 @@ AUDIT_ACTIONS = [
 # Helpers
 # ------------------------------------------------------------------
 
+def _normalize_mac(mac: str) -> str | None:
+    """Normalize MAC input for DB search (ILIKE '%<result>%').
+
+    Returns None if the input contains no hex digits at all (gibberish).
+
+    Steps:
+    1. Strip all non-hex characters.
+    2. Take the last 12 (or fewer) hex digits.
+    3. Split into pairs from the right (odd-length: first group is 1 char).
+    4. Join with ':' — matches the canonical aa:bb:cc:dd:ee:ff storage format.
+
+    Examples:
+      aabbccddeeff        -> aa:bb:cc:dd:ee:ff  (exact, ILIKE finds full match)
+      aa:bb:cc:dd:ee:ff   -> aa:bb:cc:dd:ee:ff
+      aabb.ccdd.eeff      -> aa:bb:cc:dd:ee:ff
+      aabb                -> aa:bb              (partial, ILIKE '%aa:bb%')
+      abc                 -> a:bc
+      001122334455667788  -> 33:44:55:66:77:88  (truncated to last 12)
+      xyz!!               -> None               (gibberish)
+    """
+    digits = "".join(c for c in mac if c in "0123456789abcdefABCDEF").lower()
+    if not digits:
+        return None
+    # Keep last 12 digits
+    digits = digits[-12:]
+    # Split into pairs from the right; if odd length, first chunk is 1 char
+    if len(digits) % 2:
+        pairs = [digits[0]] + [digits[i:i+2] for i in range(1, len(digits), 2)]
+    else:
+        pairs = [digits[i:i+2] for i in range(0, len(digits), 2)]
+    return ":".join(pairs)
+
+
 def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
@@ -235,7 +268,12 @@ async def search(
 ):
     db: Database = request.app.state.db
     results = None
-    mac = mac.strip()
+    mac_error = None
+    raw_mac = mac.strip()
+    mac = _normalize_mac(raw_mac) if raw_mac else ""
+    if raw_mac and mac is None:
+        mac_error = f"MAC address field contains gibberish: '{raw_mac}'"
+        mac = ""
     ip = ip.strip()
 
     if limit not in HISTORY_PAGE_SIZES:
@@ -270,6 +308,7 @@ async def search(
         {
             "user": user,
             "results": results,
+            "mac_error": mac_error,
             "q_mac": mac or None,
             "q_ip": ip or None,
             "q_range": active_preset or "",
