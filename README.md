@@ -204,12 +204,20 @@ Open http://localhost:8000 — you will be redirected to the login page.
 
 `/search` and `/history` redirect to `/` (301).
 
+### Search page features
+
+- **MAC search** — accepts any format: `aabbccddeeff`, `aa:bb:cc:dd:ee:ff`, `aabb.ccdd.eeff`, `aa-bb-cc-dd-ee-ff`. Non-hex characters are stripped; the last 12 hex digits are used (truncated from the right if longer). Partial input (fewer than 12 hex digits) is searched as a substring. Completely invalid input (no hex digits at all) shows an error.
+- **IP search** — partial text match in ARP table IP addresses; when only an IP is given (no MAC), shows all change history for that switch.
+- **Date range** — preset dropdown (1 hour / 5 hours / 1 day / 7 days / 1 month / 6 months / 1 year) or custom From / Until dates. Default: last 7 days.
+- **Change History** — paginated (Prev / Next navigation shown both above and below the table); per-page dropdown: 50 / 100 / 200 / 500 entries.
+
 ### MACs on Switches
 
 The **MACs on Switches** page (`/mac-on-switches`) shows the current MAC address table for any switch:
 
 - Select a switch from the dropdown — the table loads automatically via HTMX (no page reload).
 - **Update** button (operator+ only) triggers a live SNMP FDB poll on the selected switch, upserts results into the database, and refreshes the table in place.
+- **Client-side MAC filter** — instant search box above the table (visible only when the table is non-empty); strips `:` and `.` separators so `aabbccddee`, `aa:bb:cc:dd:ee:ff`, and `aabb.ccdd.eeff` all match.
 - Table sorts by interface by default (natural sort: Fa1/0/1 before Fa1/0/10).
 - MACs that disappeared from the switch since the last collection appear as `GONE` entries in the change history.
 
@@ -217,19 +225,19 @@ The **MACs on Switches** page (`/mac-on-switches`) shows the current MAC address
 
 The **Collector Logs** page (`/collector-logs`) shows the result of every SNMP poll run:
 
-- Filter by **collector type** (FDB / ARP), **switch IP** (partial match), **date range**, and **Errors only** toggle.
+- Filter by **collector type** (FDB / ARP), **switch IP** (partial match), **date range** (preset dropdown or custom From / Until), and **Errors only** toggle.
 - **Duration** column shows wall-clock time of the SNMP poll (formatted as `Xms` or `X.Xs`).
 - **Changed** / **Gone** counts are highlighted in bold when non-zero; Gone is shown in red.
 - **Status** column: green **OK** badge on success, red **ERROR** badge with the first 60 characters of the error message (full message in tooltip) on failure.
 - Errors are raised when `snmpwalk` exits non-zero with a non-empty stderr (timeout, no route to host, auth failure). An empty FDB/ARP table on a reachable switch is not an error.
 - **Per-page** dropdown: 50 / 100 / 200 / 500 entries.
-- Paginated with Prev / Next navigation.
+- Paginated with Prev / Next navigation (shown above and below the table).
 
 ### Audit Log features
 
-- Filter by **action type**, **date range** (From / Until), and free-text **search** (matches any field: user, action, IP, detail, timestamp — using PostgreSQL `ILIKE`).
+- Filter by **action type**, **date range** (preset dropdown or custom From / Until), and free-text **search** (matches any field: user, action, IP, detail, timestamp — using PostgreSQL `ILIKE`).
 - **Per-page** dropdown: 50 / 100 / 200 / 500 entries.
-- Paginated with Prev / Next navigation.
+- Paginated with Prev / Next navigation (shown above and below the table).
 
 ### Table sorting
 
