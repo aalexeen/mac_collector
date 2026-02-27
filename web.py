@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 SERVER_TZ = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/New_York"))
@@ -174,17 +174,74 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 # Search + History (combined)
 # ------------------------------------------------------------------
 
+# Preset time ranges: label → timedelta offset from now (None = no limit)
+TIME_RANGE_PRESETS: dict[str, timedelta | None] = {
+    "1h":  timedelta(hours=1),
+    "5h":  timedelta(hours=5),
+    "1d":  timedelta(days=1),
+    "7d":  timedelta(days=7),
+    "1m":  timedelta(days=30),
+    "6m":  timedelta(days=182),
+    "1y":  timedelta(days=365),
+}
+TIME_RANGE_DEFAULT = "7d"
+
+
+def _resolve_time_range(
+    preset: str,
+    since: str,
+    until: str,
+) -> tuple[datetime | None, datetime | None, str | None]:
+    """Return (since_dt, until_dt, active_preset).
+
+    Priority: explicit since/until → preset → default preset.
+    active_preset is the key that matches the selected dropdown option,
+    or None when a custom range is in use.
+    """
+    if since or until:
+        since_dt = None
+        until_dt = None
+        if since:
+            try:
+                since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        if until:
+            try:
+                until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        return since_dt, until_dt, None
+
+    active = preset if preset in TIME_RANGE_PRESETS else TIME_RANGE_DEFAULT
+    delta = TIME_RANGE_PRESETS[active]
+    if delta is None:
+        return None, None, active
+    since_dt = datetime.now(tz=timezone.utc) - delta
+    return since_dt, None, active
+
+
 @app.get("/", response_class=HTMLResponse)
 async def search(
     request: Request,
     mac: str = "",
     ip: str = "",
+    range: str = "",
+    since: str = "",
+    until: str = "",
+    offset: int = 0,
+    limit: int = 50,
     user: dict = Depends(get_current_user),
 ):
     db: Database = request.app.state.db
     results = None
     mac = mac.strip()
     ip = ip.strip()
+
+    if limit not in HISTORY_PAGE_SIZES:
+        limit = 50
+
+    since_dt, until_dt, active_preset = _resolve_time_range(range, since, until)
 
     if mac:
         results = await db.search_by_mac(mac)
@@ -193,9 +250,20 @@ async def search(
         results = await db.search_by_ip(ip)
         await _log(request, user["id"], "search_ip", {"query": ip})
 
-    history = await db.get_history(mac=mac or None, limit=100)
-    if mac:
-        await _log(request, user["id"], "view_history", {"mac": mac})
+    history = await db.get_history(
+        mac=mac or None,
+        switch_ip=ip or None,
+        since=since_dt,
+        until=until_dt,
+        limit=limit + 1,
+        offset=offset,
+    )
+    has_more = len(history) > limit
+    history = history[:limit]
+    total_hint = offset + len(history) + (1 if has_more else 0)
+
+    if mac or ip:
+        await _log(request, user["id"], "view_history", {"mac": mac or None, "ip": ip or None})
 
     return templates.TemplateResponse(
         request, "dashboard.html",
@@ -204,7 +272,16 @@ async def search(
             "results": results,
             "q_mac": mac or None,
             "q_ip": ip or None,
+            "q_range": active_preset or "",
+            "q_since": since or "",
+            "q_until": until or "",
+            "active_preset": active_preset,
             "history": history,
+            "page_sizes": HISTORY_PAGE_SIZES,
+            "offset": offset,
+            "limit": limit,
+            "has_more": has_more,
+            "total": total_hint,
         },
     )
 
@@ -633,6 +710,7 @@ async def admin_set_password(
 # ------------------------------------------------------------------
 
 COLLECTOR_PAGE_SIZES = [50, 100, 200, 500]
+HISTORY_PAGE_SIZES = [50, 100, 200, 500]
 
 
 @app.get("/collector-logs", response_class=HTMLResponse)
@@ -640,6 +718,7 @@ async def collector_logs_page(
     request: Request,
     collector: str = "",
     switch_ip: str = "",
+    range: str = "",
     since: str = "",
     until: str = "",
     errors_only: str = "",
@@ -651,18 +730,7 @@ async def collector_logs_page(
     if limit not in COLLECTOR_PAGE_SIZES:
         limit = 50
 
-    since_dt = None
-    until_dt = None
-    if since:
-        try:
-            since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    if until:
-        try:
-            until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
+    since_dt, until_dt, active_preset = _resolve_time_range(range, since, until)
 
     entries = await db.get_collection_log(
         collector=collector or None,
@@ -685,8 +753,10 @@ async def collector_logs_page(
             "page_sizes": COLLECTOR_PAGE_SIZES,
             "q_collector": collector or None,
             "q_switch_ip": switch_ip.strip() or None,
-            "q_since": since or None,
-            "q_until": until or None,
+            "q_range": active_preset or "",
+            "q_since": since or "",
+            "q_until": until or "",
+            "active_preset": active_preset,
             "q_errors_only": bool(errors_only),
             "offset": offset,
             "limit": limit,
@@ -703,6 +773,7 @@ AUDIT_PAGE_SIZES = [50, 100, 200, 500]
 async def audit_page(
     request: Request,
     action: str = "",
+    range: str = "",
     since: str = "",
     until: str = "",
     q: str = "",
@@ -714,18 +785,7 @@ async def audit_page(
     if limit not in AUDIT_PAGE_SIZES:
         limit = 50
 
-    since_dt = None
-    until_dt = None
-    if since:
-        try:
-            since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    if until:
-        try:
-            until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
+    since_dt, until_dt, active_preset = _resolve_time_range(range, since, until)
 
     entries = await db.get_audit_log(
         action=action or None,
@@ -735,9 +795,9 @@ async def audit_page(
         limit=limit + 1,
         offset=offset,
     )
-    total_hint = offset + len(entries)
     has_more = len(entries) > limit
     entries = entries[:limit]
+    total_hint = offset + len(entries) + (1 if has_more else 0)
 
     return templates.TemplateResponse(
         request, "audit.html",
@@ -747,11 +807,14 @@ async def audit_page(
             "actions": AUDIT_ACTIONS,
             "page_sizes": AUDIT_PAGE_SIZES,
             "q_action": action or None,
-            "q_since": since or None,
-            "q_until": until or None,
+            "q_range": active_preset or "",
+            "q_since": since or "",
+            "q_until": until or "",
+            "active_preset": active_preset,
             "q": q.strip() or None,
             "offset": offset,
             "limit": limit,
-            "total": total_hint if has_more else offset + len(entries),
+            "has_more": has_more,
+            "total": total_hint,
         },
     )

@@ -3,8 +3,18 @@
 {% block content %}
 <h1>Collector Logs</h1>
 
+{% set preset_labels = [
+    ('1h',  '1 hour'),
+    ('5h',  '5 hours'),
+    ('1d',  '1 day'),
+    ('7d',  '7 days (1 week)'),
+    ('1m',  '1 month'),
+    ('6m',  '6 months'),
+    ('1y',  '1 year'),
+] %}
+
 <div class="card">
-    <form method="get" action="/collector-logs" class="inline-form">
+    <form method="get" action="/collector-logs" class="inline-form" id="clogs-form">
         <div class="form-row" style="flex:0 0 130px">
             <label for="collector">Collector</label>
             <select id="collector" name="collector">
@@ -18,11 +28,22 @@
             <input type="text" id="switch_ip" name="switch_ip"
                    value="{{ q_switch_ip or '' }}" placeholder="192.168.1…">
         </div>
-        <div class="form-row" style="flex:0 0 160px">
+        <div class="form-row" style="flex:0 0 180px">
+            <label for="cl-range-select">Date range</label>
+            <select id="cl-range-select" name="range">
+                {% for key, label in preset_labels %}
+                <option value="{{ key }}" {% if active_preset == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+                <option value="" {% if not active_preset %}selected{% endif %}>Custom…</option>
+            </select>
+        </div>
+        <div class="form-row" style="flex:0 0 150px" id="cl-since-row"
+             {% if active_preset %}hidden{% endif %}>
             <label for="since">From</label>
             <input type="date" id="since" name="since" value="{{ q_since or '' }}">
         </div>
-        <div class="form-row" style="flex:0 0 160px">
+        <div class="form-row" style="flex:0 0 150px" id="cl-until-row"
+             {% if active_preset %}hidden{% endif %}>
             <label for="until">Until</label>
             <input type="date" id="until" name="until" value="{{ q_until or '' }}">
         </div>
@@ -46,7 +67,7 @@
             <label>&nbsp;</label>
             <button type="submit" class="btn btn-primary">Filter</button>
         </div>
-        {% if q_collector or q_switch_ip or q_since or q_until or q_errors_only %}
+        {% if q_collector or q_switch_ip or q_range or q_since or q_until or q_errors_only %}
         <div class="form-row" style="flex:0">
             <label>&nbsp;</label>
             <a href="/collector-logs" class="btn btn-secondary">Clear</a>
@@ -55,7 +76,45 @@
     </form>
 </div>
 
+<script>
+(function () {
+    const sel      = document.getElementById('cl-range-select');
+    const sinceRow = document.getElementById('cl-since-row');
+    const untilRow = document.getElementById('cl-until-row');
+    const sinceIn  = document.getElementById('since');
+    const untilIn  = document.getElementById('until');
+
+    function toggle() {
+        const custom = sel.value === '';
+        sinceRow.hidden = !custom;
+        untilRow.hidden = !custom;
+        if (!custom) {
+            sinceIn.value = '';
+            untilIn.value = '';
+        }
+    }
+
+    sel.addEventListener('change', toggle);
+})();
+</script>
+
 <div class="card">
+    {% if total > 0 %}
+    {% set base_qs %}collector={{ q_collector or '' }}&switch_ip={{ q_switch_ip or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&errors_only={{ '1' if q_errors_only else '' }}&limit={{ limit }}{% endset %}
+    <div style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center">
+        {% if offset > 0 %}
+        <a href="/collector-logs?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}"
+           class="btn btn-secondary">← Prev</a>
+        {% endif %}
+        <span style="font-size:.85rem;color:#888">
+            {{ offset + 1 }}–{{ offset + entries|length }}{% if has_more %}&plus;{% endif %}
+        </span>
+        {% if has_more %}
+        <a href="/collector-logs?{{ base_qs }}&offset={{ offset + limit }}"
+           class="btn btn-secondary">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
     <table data-sortable data-sort-col="0" data-sort-dir="desc">
         <thead>
             <tr>
@@ -123,7 +182,7 @@
     </table>
 
     {% if total > 0 %}
-    {% set base_qs %}collector={{ q_collector or '' }}&switch_ip={{ q_switch_ip or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&errors_only={{ '1' if q_errors_only else '' }}&limit={{ limit }}{% endset %}
+    {% set base_qs %}collector={{ q_collector or '' }}&switch_ip={{ q_switch_ip or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&errors_only={{ '1' if q_errors_only else '' }}&limit={{ limit }}{% endset %}
     <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center">
         {% if offset > 0 %}
         <a href="/collector-logs?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}"

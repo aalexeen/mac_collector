@@ -49,7 +49,9 @@ class FdbCollector:
     OID_IF_NAME     = ".1.3.6.1.2.1.31.1.1.1.1"           # ifName
     OID_TRUNK_STATE  = ".1.3.6.1.4.1.9.9.46.1.6.1.1.13"   # vlanTrunkPortDynamicState
     OID_TRUNK_STATUS = ".1.3.6.1.4.1.9.9.46.1.6.1.1.14"   # vlanTrunkPortDynamicStatus
-    OID_SYS_NAME     = ".1.3.6.1.2.1.1.5.0"               # sysName (MIB-II)
+    OID_VM_VLAN       = ".1.3.6.1.4.1.9.9.68.1.2.2.1.2"    # vmVlan (CISCO-VLAN-MEMBERSHIP-MIB)
+    OID_VM_VOICE_VLAN = ".1.3.6.1.4.1.9.9.68.1.5.1.1.1"   # vmVoiceVlanId (CISCO-VLAN-MEMBERSHIP-MIB)
+    OID_SYS_NAME      = ".1.3.6.1.2.1.1.5.0"               # sysName (MIB-II)
 
     # vtpVlanState value for active VLAN
     _VLAN_ACTIVE = 1
@@ -200,6 +202,25 @@ class FdbCollector:
                 continue
         return mapping
 
+    def _parse_vm_vlan(self, lines: list[str]) -> dict[int, int]:
+        """Parse vmVlan output → {ifIndex: vlan_id} for ACCESS ports only.
+
+        OID suffix is the ifIndex; value is the assigned VLAN ID.
+        Trunk ports are naturally absent from this OID tree.
+
+        Returns:
+            Mapping of ifIndex → VLAN ID.
+        """
+        mapping: dict[int, int] = {}
+        for line in lines:
+            try:
+                oid_part, value_part = line.split(" = INTEGER: ", 1)
+                ifidx = int(oid_part.split(".")[-1])
+                mapping[ifidx] = int(value_part.strip())
+            except (ValueError, IndexError):
+                continue
+        return mapping
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -257,13 +278,17 @@ class FdbCollector:
         """Poll the switch FDB table and return one MacEntry per unique MAC.
 
         Steps:
-          1. Discover active VLANs via vtpVlanState.
+          1. Fetch interface names via ifName.
           2. Identify ACCESS port ifIndexes via trunk state/status OIDs.
-          3. For each VLAN walk dot1dTpFdbAddress and dot1dTpFdbPort using
-             the ``community@vlan`` indexing scheme.
-          4. Resolve bridge-port → ifIndex via dot1dBasePortIfIndex.
-          5. Filter out MACs on trunk ports.
-          6. Aggregate all VLANs/interfaces per MAC into sorted lists.
+          3. Fetch ACCESS-port data VLAN assignments via vmVlan OID.
+          4. Fetch voice VLAN assignments via vmVoiceVlanId OID and merge into
+             the same {vlan_id: set(ifindex)} map; filter out sentinel values
+             0 (untagged), 4095 (untagged), and 4096 (not configured).
+          5. For each VLAN walk dot1dTpFdbAddress, dot1dTpFdbPort, and
+             dot1dBasePortIfIndex using the ``community@vlan`` indexing scheme.
+          6. Filter MACs: only keep those whose bridge port maps to an ifIndex
+             in the ACCESS set for that specific VLAN.
+          7. Aggregate all VLANs/interfaces per MAC into sorted lists.
 
         Returns:
             list[MacEntry] — one entry per unique MAC, fields sorted.
@@ -272,9 +297,39 @@ class FdbCollector:
             FileNotFoundError:        snmpwalk binary not found.
             subprocess.TimeoutExpired: switch unreachable or slow.
         """
-        ifnames       = self._parse_if_names(self._snmpwalk(self.OID_IF_NAME))
-        access_ports  = self._get_access_ifindexes()
-        vlans         = self._parse_vlans(self._snmpwalk(self.OID_VTP_VLAN))
+        ifnames      = self._parse_if_names(self._snmpwalk(self.OID_IF_NAME))
+        access_ports = self._get_access_ifindexes()
+
+        # Discover which VLAN each ACCESS port belongs to.
+        vm_vlan_map = self._parse_vm_vlan(self._snmpwalk(self.OID_VM_VLAN))
+
+        # Build {vlan_id: set(ifindex)} — only ACCESS ports on non-reserved VLANs.
+        vlan_to_ports: dict[int, set[int]] = defaultdict(set)
+        for ifidx, vlan_id in vm_vlan_map.items():
+            if ifidx not in access_ports:
+                continue
+            if vlan_id in self._VLAN_RESERVED:
+                continue
+            vlan_to_ports[vlan_id].add(ifidx)
+
+        # Also include voice VLANs (switchport voice vlan <id>).
+        # vmVoiceVlanId uses the same ifIndex key and INTEGER format as vmVlan,
+        # so _parse_vm_vlan handles it.  Filter sentinel values:
+        #   0    → untagged with 802.1p priority
+        #   4095 → untagged without priority
+        #   4096 → no voice VLAN configured
+        voice_vlan_map = self._parse_vm_vlan(self._snmpwalk(self.OID_VM_VOICE_VLAN))
+        for ifidx, vlan_id in voice_vlan_map.items():
+            if ifidx not in access_ports:
+                continue
+            if vlan_id == 0 or vlan_id >= 4095:
+                continue
+            if vlan_id in self._VLAN_RESERVED:
+                continue
+            vlan_to_ports[vlan_id].add(ifidx)
+
+        if not vlan_to_ports:
+            return []
 
         # Aggregate per MAC address.
         # A single MAC may be learned on multiple VLANs/interfaces (loop /
@@ -283,7 +338,7 @@ class FdbCollector:
             lambda: {"switch_ips": set(), "vlan_ids": set(), "interfaces": set()}
         )
 
-        for vlan in vlans:
+        for vlan, port_set in vlan_to_ports.items():
             fdb_macs  = self._parse_fdb_macs( self._snmpwalk(self.OID_FDB_MAC,  vlan))
             fdb_ports = self._parse_fdb_ports(self._snmpwalk(self.OID_FDB_PORT, vlan))
             bp_map    = self._parse_int_map(  self._snmpwalk(self.OID_BRIDGE_IF, vlan))
@@ -293,7 +348,7 @@ class FdbCollector:
                 if bridge_port is None:
                     continue
                 ifidx = bp_map.get(bridge_port)
-                if ifidx is None or ifidx not in access_ports:
+                if ifidx is None or ifidx not in port_set:
                     continue
 
                 ifname = ifnames.get(ifidx, f"ifindex-{ifidx}")

@@ -109,6 +109,7 @@ class Database:
         if is_core is not None:
             sql += " AND is_core = $1"
             args.append(is_core)
+        sql += " ORDER BY ip_address::inet"
         async with self._pool.acquire() as conn:
             return await conn.fetch(sql, *args)
 
@@ -539,31 +540,75 @@ class Database:
     async def get_history(
         self,
         mac: str | None = None,
+        switch_ip: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[asyncpg.Record]:
-        """Return combined arp_changes + mac_changes ordered by time."""
-        conditions = []
+        """Return combined arp_changes + mac_changes ordered by time.
+
+        switch_ip filters mac_changes by switch presence in switch_ips array.
+        since/until filter by changed_at timestamp.
+        """
+        # Build per-table WHERE clauses: arp_changes does not have switch_ips,
+        # so switch_ip only applies to mac_changes.
+        arp_conds: list[str] = []
+        mac_conds: list[str] = []
         args: list = []
         idx = 1
 
         if mac:
-            conditions.append(f"mac_address::text ILIKE ${idx}")
+            arp_conds.append(f"mac_address::text ILIKE ${idx}")
+            mac_conds.append(f"mac_address::text ILIKE ${idx}")
             args.append(f"%{mac}%")
             idx += 1
 
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-        sql = f"""
-            SELECT mac_address, 'arp' AS source, change_flags, changed_at,
-                   ip_addresses, vlan_ids, interfaces
-            FROM arp_changes {where}
-            UNION ALL
-            SELECT mac_address, 'mac' AS source, change_flags, changed_at,
-                   switch_ips AS ip_addresses, vlan_ids, interfaces
-            FROM mac_changes {where}
-            ORDER BY changed_at DESC
-            LIMIT ${idx} OFFSET ${idx + 1}
-        """
+        if switch_ip:
+            # For arp_changes: no switch_ips column — exclude entirely when
+            # filtering by switch; only query mac_changes.
+            mac_conds.append(
+                f"${idx}::inet = ANY(switch_ips)"
+            )
+            args.append(switch_ip)
+            idx += 1
+
+        if since is not None:
+            arp_conds.append(f"changed_at >= ${idx}")
+            mac_conds.append(f"changed_at >= ${idx}")
+            args.append(since)
+            idx += 1
+
+        if until is not None:
+            arp_conds.append(f"changed_at <= ${idx}")
+            mac_conds.append(f"changed_at <= ${idx}")
+            args.append(until)
+            idx += 1
+
+        arp_where = ("WHERE " + " AND ".join(arp_conds)) if arp_conds else ""
+        mac_where = ("WHERE " + " AND ".join(mac_conds)) if mac_conds else ""
+
+        # When filtering by switch_ip we skip arp_changes (no switch_ips column)
+        if switch_ip:
+            sql = f"""
+                SELECT mac_address, 'mac' AS source, change_flags, changed_at,
+                       switch_ips AS ip_addresses, vlan_ids, interfaces
+                FROM mac_changes {mac_where}
+                ORDER BY changed_at DESC
+                LIMIT ${idx} OFFSET ${idx + 1}
+            """
+        else:
+            sql = f"""
+                SELECT mac_address, 'arp' AS source, change_flags, changed_at,
+                       ip_addresses, vlan_ids, interfaces
+                FROM arp_changes {arp_where}
+                UNION ALL
+                SELECT mac_address, 'mac' AS source, change_flags, changed_at,
+                       switch_ips AS ip_addresses, vlan_ids, interfaces
+                FROM mac_changes {mac_where}
+                ORDER BY changed_at DESC
+                LIMIT ${idx} OFFSET ${idx + 1}
+            """
         args.extend([limit, offset])
         async with self._pool.acquire() as conn:
             return await conn.fetch(sql, *args)

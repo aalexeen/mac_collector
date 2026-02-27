@@ -267,12 +267,16 @@ When adding or editing a switch, the IP address is validated with Python's `ipad
 
 | OID | Name | Description |
 |-----|------|-------------|
-| `.1.3.6.1.4.1.9.9.46.1.3.1.1.2` | vtpVlanState | Active VLAN discovery |
+| `.1.3.6.1.4.1.9.9.68.1.2.2.1.2` | vmVlan | Data VLAN assignment per ACCESS port (ifIndex → VLAN ID) |
+| `.1.3.6.1.4.1.9.9.68.1.5.1.1.1` | vmVoiceVlanId | Voice VLAN assignment per ACCESS port; values 0 / 4095 / 4096 filtered |
 | `.1.3.6.1.2.1.17.4.3.1.1` | dot1dTpFdbAddress | MAC address (per-VLAN via `community@vlan`) |
 | `.1.3.6.1.2.1.17.4.3.1.2` | dot1dTpFdbPort | Bridge port number |
 | `.1.3.6.1.2.1.17.1.4.1.2` | dot1dBasePortIfIndex | Bridge port to ifIndex mapping |
 | `.1.3.6.1.4.1.9.9.46.1.6.1.1.13` | vlanTrunkPortDynamicState | Port mode (trunk/access) |
 | `.1.3.6.1.4.1.9.9.46.1.6.1.1.14` | vlanTrunkPortDynamicStatus | Actual trunk status |
+| `.1.3.6.1.4.1.9.9.46.1.3.1.1.2` | vtpVlanState | Active VLAN discovery (retained, not used in collect) |
+
+VLAN discovery uses `vmVlan` + `vmVoiceVlanId` instead of a full `vtpVlanState` walk — FDB is polled only for VLANs that have at least one ACCESS port assigned, reducing SNMP traffic significantly.
 
 **Important:** `dot1dTpFdbAddress` and `dot1dTpFdbPort` are both indexed by the full 6-octet MAC address in the OID suffix (e.g., `.1.2.3.4.5.6`). The join between MAC addresses and bridge port numbers uses this 6-octet suffix as the key — not the last octet alone.
 

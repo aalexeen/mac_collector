@@ -3,8 +3,18 @@
 {% block content %}
 <h1>Audit Log</h1>
 
+{% set preset_labels = [
+    ('1h',  '1 hour'),
+    ('5h',  '5 hours'),
+    ('1d',  '1 day'),
+    ('7d',  '7 days (1 week)'),
+    ('1m',  '1 month'),
+    ('6m',  '6 months'),
+    ('1y',  '1 year'),
+] %}
+
 <div class="card">
-    <form method="get" action="/audit" class="inline-form">
+    <form method="get" action="/audit" class="inline-form" id="audit-form">
         <div class="form-row" style="flex:0 0 180px">
             <label for="action">Action</label>
             <select id="action" name="action">
@@ -15,10 +25,21 @@
             </select>
         </div>
         <div class="form-row" style="flex:0 0 180px">
+            <label for="audit-range-select">Date range</label>
+            <select id="audit-range-select" name="range">
+                {% for key, label in preset_labels %}
+                <option value="{{ key }}" {% if active_preset == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+                <option value="" {% if not active_preset %}selected{% endif %}>Custom…</option>
+            </select>
+        </div>
+        <div class="form-row" style="flex:0 0 150px" id="audit-since-row"
+             {% if active_preset %}hidden{% endif %}>
             <label for="since">From</label>
             <input type="date" id="since" name="since" value="{{ q_since or '' }}">
         </div>
-        <div class="form-row" style="flex:0 0 180px">
+        <div class="form-row" style="flex:0 0 150px" id="audit-until-row"
+             {% if active_preset %}hidden{% endif %}>
             <label for="until">Until</label>
             <input type="date" id="until" name="until" value="{{ q_until or '' }}">
         </div>
@@ -39,7 +60,7 @@
             <label>&nbsp;</label>
             <button type="submit" class="btn btn-primary">Filter</button>
         </div>
-        {% if q_action or q_since or q_until or q %}
+        {% if q_action or q_range or q_since or q_until or q %}
         <div class="form-row" style="flex:0">
             <label>&nbsp;</label>
             <a href="/audit" class="btn btn-secondary">Clear</a>
@@ -48,7 +69,45 @@
     </form>
 </div>
 
+<script>
+(function () {
+    const sel      = document.getElementById('audit-range-select');
+    const sinceRow = document.getElementById('audit-since-row');
+    const untilRow = document.getElementById('audit-until-row');
+    const sinceIn  = document.getElementById('since');
+    const untilIn  = document.getElementById('until');
+
+    function toggle() {
+        const custom = sel.value === '';
+        sinceRow.hidden = !custom;
+        untilRow.hidden = !custom;
+        if (!custom) {
+            sinceIn.value = '';
+            untilIn.value = '';
+        }
+    }
+
+    sel.addEventListener('change', toggle);
+})();
+</script>
+
 <div class="card">
+    {% if total > 0 %}
+    {% set base_qs %}action={{ q_action or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&q={{ q or '' }}&limit={{ limit }}{% endset %}
+    <div style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center">
+        {% if offset > 0 %}
+        <a href="/audit?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}"
+           class="btn btn-secondary">← Prev</a>
+        {% endif %}
+        <span style="font-size:.85rem;color:#888">
+            {{ offset + 1 }}–{{ offset + entries|length }}{% if has_more %}&plus;{% endif %}
+        </span>
+        {% if has_more %}
+        <a href="/audit?{{ base_qs }}&offset={{ offset + limit }}"
+           class="btn btn-secondary">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
     <table data-sortable data-sort-col="0" data-sort-dir="desc">
         <thead>
             <tr>
@@ -77,16 +136,17 @@
     </table>
 
     {% if total > 0 %}
+    {% set base_qs %}action={{ q_action or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&q={{ q or '' }}&limit={{ limit }}{% endset %}
     <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center">
         {% if offset > 0 %}
-        <a href="/audit?action={{ q_action or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&q={{ q or '' }}&limit={{ limit }}&offset={{ [offset - limit, 0]|max }}"
+        <a href="/audit?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}"
            class="btn btn-secondary">← Prev</a>
         {% endif %}
         <span style="font-size:.85rem;color:#888">
-            {{ offset + 1 }}–{{ [offset + limit, total]|min }} of {{ total }}{% if total == offset + limit %}&plus;{% endif %}
+            {{ offset + 1 }}–{{ offset + entries|length }}{% if has_more %}&plus;{% endif %}
         </span>
-        {% if offset + limit < total %}
-        <a href="/audit?action={{ q_action or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&q={{ q or '' }}&limit={{ limit }}&offset={{ offset + limit }}"
+        {% if has_more %}
+        <a href="/audit?{{ base_qs }}&offset={{ offset + limit }}"
            class="btn btn-secondary">Next →</a>
         {% endif %}
     </div>
