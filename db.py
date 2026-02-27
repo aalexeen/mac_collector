@@ -543,6 +543,9 @@ class Database:
         switch_ip: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
+        vlan: int | None = None,
+        interface: str | None = None,
+        changes: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[asyncpg.Record]:
@@ -550,6 +553,9 @@ class Database:
 
         switch_ip filters mac_changes by switch presence in switch_ips array.
         since/until filter by changed_at timestamp.
+        vlan filters by VLAN id presence in vlan_ids array.
+        interface filters by partial match in interfaces array.
+        changes filters by exact change_flags value.
         """
         # Build per-table WHERE clauses: arp_changes does not have switch_ips,
         # so switch_ip only applies to mac_changes.
@@ -583,6 +589,24 @@ class Database:
             arp_conds.append(f"changed_at <= ${idx}")
             mac_conds.append(f"changed_at <= ${idx}")
             args.append(until)
+            idx += 1
+
+        if vlan is not None:
+            arp_conds.append(f"${idx} = ANY(vlan_ids)")
+            mac_conds.append(f"${idx} = ANY(vlan_ids)")
+            args.append(vlan)
+            idx += 1
+
+        if interface:
+            arp_conds.append(f"EXISTS (SELECT 1 FROM unnest(interfaces) AS i WHERE i ILIKE ${idx})")
+            mac_conds.append(f"EXISTS (SELECT 1 FROM unnest(interfaces) AS i WHERE i ILIKE ${idx})")
+            args.append(f"%{interface}%")
+            idx += 1
+
+        if changes is not None:
+            arp_conds.append(f"change_flags = ${idx}")
+            mac_conds.append(f"change_flags = ${idx}")
+            args.append(changes)
             idx += 1
 
         arp_where = ("WHERE " + " AND ".join(arp_conds)) if arp_conds else ""

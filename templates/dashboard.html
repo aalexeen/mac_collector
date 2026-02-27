@@ -14,54 +14,79 @@
 ] %}
 
 <div class="card">
-    <form method="get" action="/" class="inline-form" id="search-form">
-        <div class="form-row">
-            <label for="mac">MAC Address</label>
-            <input type="text" id="mac" name="mac" value="{{ q_mac or '' }}"
-                   placeholder="aa:bb:cc:dd:ee:ff">
+    <form method="get" action="/" id="search-form">
+        <div class="inline-form" style="margin-bottom:.5rem">
+            <div class="form-row">
+                <label for="mac">MAC Address</label>
+                <input type="text" id="mac" name="mac" value="{{ q_mac or '' }}"
+                       placeholder="aa:bb:cc:dd:ee:ff">
+            </div>
+            <div class="form-row">
+                <label for="ip">IP / Switch IP</label>
+                <input type="text" id="ip" name="ip" value="{{ q_ip or '' }}"
+                       placeholder="192.168.1.100">
+            </div>
+            <div class="form-row" style="flex:0 0 90px">
+                <label for="vlan">VLAN</label>
+                <input type="text" id="vlan" name="vlan" value="{{ q_vlan or '' }}"
+                       placeholder="100">
+            </div>
+            <div class="form-row">
+                <label for="interface">Interface</label>
+                <input type="text" id="interface" name="interface" value="{{ q_interface or '' }}"
+                       placeholder="Gi1/0/1">
+            </div>
+            <div class="form-row" style="flex:0 0 140px">
+                <label for="changes">Changes</label>
+                <select id="changes" name="changes">
+                    <option value="" {% if not q_changes %}selected{% endif %}></option>
+                    <option value="4" {% if q_changes == '4' %}selected{% endif %}>IP changed</option>
+                    <option value="2" {% if q_changes == '2' %}selected{% endif %}>VLAN changed</option>
+                    <option value="1" {% if q_changes == '1' %}selected{% endif %}>Interface changed</option>
+                    <option value="7" {% if q_changes == '7' %}selected{% endif %}>All changed</option>
+                    <option value="0" {% if q_changes == '0' %}selected{% endif %}>Gone</option>
+                </select>
+            </div>
         </div>
-        <div class="form-row">
-            <label for="ip">IP Address</label>
-            <input type="text" id="ip" name="ip" value="{{ q_ip or '' }}"
-                   placeholder="192.168.1.100">
+        <div class="inline-form" style="justify-content:flex-end">
+            <div class="form-row" style="flex:0 0 180px">
+                <label for="range-select">History range</label>
+                <select id="range-select" name="range">
+                    {% for key, label in preset_labels %}
+                    <option value="{{ key }}" {% if active_preset == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    <option value="" {% if not active_preset %}selected{% endif %}>Custom…</option>
+                </select>
+            </div>
+            <div class="form-row" style="flex:0 0 150px" id="since-row"
+                 {% if active_preset %}hidden{% endif %}>
+                <label for="since">From</label>
+                <input type="date" id="since" name="since" value="{{ q_since or '' }}">
+            </div>
+            <div class="form-row" style="flex:0 0 150px" id="until-row"
+                 {% if active_preset %}hidden{% endif %}>
+                <label for="until">Until</label>
+                <input type="date" id="until" name="until" value="{{ q_until or '' }}">
+            </div>
+            <div class="form-row" style="flex:0 0 100px">
+                <label for="limit">Per page</label>
+                <select id="limit" name="limit">
+                    {% for s in page_sizes %}
+                    <option value="{{ s }}" {% if s == limit %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-row" style="flex:0">
+                <label>&nbsp;</label>
+                <button type="submit" class="btn btn-primary">Search</button>
+            </div>
+            {% if q_mac or q_ip or q_vlan or q_interface or q_changes or q_since or q_until or (q_range and q_range != '7d') %}
+            <div class="form-row" style="flex:0">
+                <label>&nbsp;</label>
+                <a href="/" class="btn btn-secondary">Clear</a>
+            </div>
+            {% endif %}
         </div>
-        <div class="form-row" style="flex:0 0 180px">
-            <label for="range-select">History range</label>
-            <select id="range-select" name="range">
-                {% for key, label in preset_labels %}
-                <option value="{{ key }}" {% if active_preset == key %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-                <option value="" {% if not active_preset %}selected{% endif %}>Custom…</option>
-            </select>
-        </div>
-        <div class="form-row" style="flex:0 0 150px" id="since-row"
-             {% if active_preset %}hidden{% endif %}>
-            <label for="since">From</label>
-            <input type="date" id="since" name="since" value="{{ q_since or '' }}">
-        </div>
-        <div class="form-row" style="flex:0 0 150px" id="until-row"
-             {% if active_preset %}hidden{% endif %}>
-            <label for="until">Until</label>
-            <input type="date" id="until" name="until" value="{{ q_until or '' }}">
-        </div>
-        <div class="form-row" style="flex:0 0 100px">
-            <label for="limit">Per page</label>
-            <select id="limit" name="limit">
-                {% for s in page_sizes %}
-                <option value="{{ s }}" {% if s == limit %}selected{% endif %}>{{ s }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="form-row" style="flex:0">
-            <label>&nbsp;</label>
-            <button type="submit" class="btn btn-primary">Search</button>
-        </div>
-        {% if q_mac or q_ip or q_since or q_until or (q_range and q_range != '7d') %}
-        <div class="form-row" style="flex:0">
-            <label>&nbsp;</label>
-            <a href="/" class="btn btn-secondary">Clear</a>
-        </div>
-        {% endif %}
     </form>
 </div>
 
@@ -116,7 +141,9 @@
                     {% if row.ip_addresses is defined %}
                         {{ row.ip_addresses | join(', ') }}
                     {% else %}
-                        {{ row.switch_ips | join(', ') }}
+                        {% for sip in row.switch_ips %}
+                        <div>{{ sip }}{% set hn = sw_hostnames.get(sip|string) %}{% if hn %}<br><span style="font-size:.8em;color:#888">{{ hn }}</span>{% endif %}</div>
+                        {% endfor %}
                     {% endif %}
                 </td>
                 <td>{{ row.vlan_ids | join(', ') }}</td>
@@ -140,7 +167,7 @@
 
 <div class="card">
     {% if total > 0 %}
-    {% set base_qs %}mac={{ q_mac or '' }}&ip={{ q_ip or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&limit={{ limit }}{% endset %}
+    {% set base_qs %}mac={{ q_mac or '' }}&ip={{ q_ip or '' }}&vlan={{ q_vlan or '' }}&interface={{ q_interface or '' }}&changes={{ q_changes or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&limit={{ limit }}{% endset %}
     <div style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center">
         {% if offset > 0 %}
         <a href="/?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}" class="btn btn-secondary">← Prev</a>
@@ -169,7 +196,13 @@
         <tr>
             <td style="white-space:nowrap">{{ (row.changed_at | localdt).strftime('%Y-%m-%d %H:%M:%S') }}</td>
             <td><code>{{ row.mac_address }}</code></td>
-            <td>{{ row.ip_addresses | join(', ') if row.ip_addresses else '—' }}</td>
+            <td>
+                {% if row.ip_addresses %}
+                    {% for sip in row.ip_addresses %}
+                    <div>{{ sip }}{% set hn = sw_hostnames.get(sip|string) %}{% if hn %}<br><span style="font-size:.8em;color:#888">{{ hn }}</span>{% endif %}</div>
+                    {% endfor %}
+                {% else %}—{% endif %}
+            </td>
             <td>{{ row.vlan_ids | join(', ') if row.vlan_ids else '—' }}</td>
             <td>{{ row.interfaces | join(', ') if row.interfaces else '—' }}</td>
             <td>
@@ -189,7 +222,7 @@
     </table>
 
     {% if total > 0 %}
-    {% set base_qs %}mac={{ q_mac or '' }}&ip={{ q_ip or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&limit={{ limit }}{% endset %}
+    {% set base_qs %}mac={{ q_mac or '' }}&ip={{ q_ip or '' }}&vlan={{ q_vlan or '' }}&interface={{ q_interface or '' }}&changes={{ q_changes or '' }}&range={{ q_range or '' }}&since={{ q_since or '' }}&until={{ q_until or '' }}&limit={{ limit }}{% endset %}
     <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center">
         {% if offset > 0 %}
         <a href="/?{{ base_qs }}&offset={{ [offset - limit, 0]|max }}" class="btn btn-secondary">← Prev</a>
