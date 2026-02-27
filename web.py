@@ -259,6 +259,9 @@ async def search(
     request: Request,
     mac: str = "",
     ip: str = "",
+    vlan: str = "",
+    interface: str = "",
+    changes: str = "",
     range: str = "",
     since: str = "",
     until: str = "",
@@ -269,12 +272,27 @@ async def search(
     db: Database = request.app.state.db
     results = None
     mac_error = None
+    switches = await db.get_switches()
+    sw_hostnames = {str(sw["ip_address"]): sw["hostname"] for sw in switches if sw["hostname"]}
     raw_mac = mac.strip()
     mac = _normalize_mac(raw_mac) if raw_mac else ""
     if raw_mac and mac is None:
         mac_error = f"MAC address field contains gibberish: '{raw_mac}'"
         mac = ""
     ip = ip.strip()
+    interface = interface.strip()
+    vlan_int: int | None = None
+    if vlan.strip():
+        try:
+            vlan_int = int(vlan.strip())
+        except ValueError:
+            pass
+    changes_int: int | None = None
+    if changes.strip():
+        try:
+            changes_int = int(changes.strip())
+        except ValueError:
+            pass
 
     if limit not in HISTORY_PAGE_SIZES:
         limit = 50
@@ -293,6 +311,9 @@ async def search(
         switch_ip=ip or None,
         since=since_dt,
         until=until_dt,
+        vlan=vlan_int,
+        interface=interface or None,
+        changes=changes_int,
         limit=limit + 1,
         offset=offset,
     )
@@ -311,11 +332,15 @@ async def search(
             "mac_error": mac_error,
             "q_mac": mac or None,
             "q_ip": ip or None,
+            "q_vlan": vlan.strip() or "",
+            "q_interface": interface or "",
+            "q_changes": changes.strip() or "",
             "q_range": active_preset or "",
             "q_since": since or "",
             "q_until": until or "",
             "active_preset": active_preset,
             "history": history,
+            "sw_hostnames": sw_hostnames,
             "page_sizes": HISTORY_PAGE_SIZES,
             "offset": offset,
             "limit": limit,
@@ -769,6 +794,9 @@ async def collector_logs_page(
     if limit not in COLLECTOR_PAGE_SIZES:
         limit = 50
 
+    switches = await db.get_switches()
+    sw_hostnames = {str(sw["ip_address"]): sw["hostname"] for sw in switches if sw["hostname"]}
+
     since_dt, until_dt, active_preset = _resolve_time_range(range, since, until)
 
     entries = await db.get_collection_log(
@@ -789,6 +817,7 @@ async def collector_logs_page(
         {
             "user": user,
             "entries": entries,
+            "sw_hostnames": sw_hostnames,
             "page_sizes": COLLECTOR_PAGE_SIZES,
             "q_collector": collector or None,
             "q_switch_ip": switch_ip.strip() or None,

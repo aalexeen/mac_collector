@@ -139,7 +139,11 @@
                     {{ row.collector | upper }}
                 </span>
             </td>
-            <td><code>{{ row.switch_ip }}</code></td>
+            <td>
+                <code>{{ row.switch_ip }}</code>
+                {% set hn = sw_hostnames.get(row.switch_ip|string) %}
+                {% if hn %}<br><span style="font-size:.8em;color:#888">{{ hn }}</span>{% endif %}
+            </td>
             <td style="text-align:right;color:#666">
                 {% if row.duration_ms is not none %}
                     {% if row.duration_ms >= 1000 %}
