@@ -42,6 +42,60 @@ Both collectors write to:
 
 **Web UI** — FastAPI + Jinja2 + HTMX, role-based access (admin / operator / viewer), all actions logged to `audit_log`.
 
+## Docker (Demo / Quick Start)
+
+The fastest way to run the application — no manual PostgreSQL setup required.
+
+### Requirements
+
+- Docker 28+: `sudo apt install docker.io docker-compose-v2`
+- Add your user to the docker group: `sudo usermod -aG docker $USER && newgrp docker`
+
+### Setup
+
+```bash
+cp .env.example .env
+# Edit .env: set SNMP_COMMUNITY to your switch community string
+```
+
+### Run
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+
+Open http://localhost:8000 and log in as `admin@demo.local` / `admin`.
+
+The container starts two processes:
+- **uvicorn** — web UI on port 8000
+- **collector_loop.py** — polls all enabled switches every `COLLECT_INTERVAL` seconds (default: 300)
+
+PostgreSQL data is stored in a named Docker volume (`pgdata`) and persists across restarts.
+
+### Configuration (`.env`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SNMP_COMMUNITY` | `public` | SNMP v2c community string |
+| `COLLECT_INTERVAL` | `300` | Poll interval in seconds |
+| `DISPLAY_TZ` | `America/New_York` | Timezone for web UI timestamps |
+| `ADMIN_EMAIL` | `admin@demo.local` | Admin account created on first start |
+| `ADMIN_PASSWORD` | `admin` | Admin password created on first start |
+
+### Docker files
+
+```
+docker/
+├── Dockerfile
+├── docker-compose.yml
+└── docker-entrypoint.sh
+.dockerignore
+.env.example
+collector_loop.py
+```
+
+---
+
 ## Production Installation
 
 ```bash
@@ -206,10 +260,23 @@ Open http://localhost:8000 — you will be redirected to the login page.
 
 ### Search page features
 
-- **MAC search** — accepts any format: `aabbccddeeff`, `aa:bb:cc:dd:ee:ff`, `aabb.ccdd.eeff`, `aa-bb-cc-dd-ee-ff`. Non-hex characters are stripped; the last 12 hex digits are used (truncated from the right if longer). Partial input (fewer than 12 hex digits) is searched as a substring. Completely invalid input (no hex digits at all) shows an error.
-- **IP search** — partial text match in ARP table IP addresses; when only an IP is given (no MAC), shows all change history for that switch.
-- **Date range** — preset dropdown (1 hour / 5 hours / 1 day / 7 days / 1 month / 6 months / 1 year) or custom From / Until dates. Default: last 7 days.
-- **Change History** — paginated (Prev / Next navigation shown both above and below the table); per-page dropdown: 50 / 100 / 200 / 500 entries.
+The search form has two rows:
+
+**Row 1 — filters applied to Change History (AND logic when multiple fields are set):**
+- **MAC Address** — accepts any format: `aabbccddeeff`, `aa:bb:cc:dd:ee:ff`, `aabb.ccdd.eeff`, `aa-bb-cc-dd-ee-ff`. Non-hex characters are stripped; the last 12 hex digits are used (truncated from the right if longer). Partial input (fewer than 12 hex digits) is searched as a substring. Completely invalid input (no hex digits at all) shows an error.
+- **IP / Switch IP** — must be a valid IP address (validated with Python `ipaddress`); used for exact match against switch IPs in change history and for ARP lookup in Results. Invalid input shows an error and is excluded from the search.
+- **VLAN** — integer, must be in range 1–4094. Out-of-range or non-numeric input shows an error and is excluded from the search.
+- **Interface** — partial text match against interface names (e.g. `Gi1/0`).
+- **Changes** — dropdown: empty (any) / IP changed / VLAN changed / Interface changed / All changed / Gone. Matches exact `change_flags` bitmask value.
+
+**Row 2 — display and time controls (right-aligned):**
+- **History range** — preset dropdown (1 hour / 5 hours / 1 day / 7 days / 1 month / 6 months / 1 year) or custom From / Until dates. Default: last 7 days.
+- **Per page** — 50 / 100 / 200 / 500 entries.
+- **Search** button, **Clear** link (shown when any non-default filter is active).
+
+**Change History** — paginated with Prev / Next navigation shown both above and below the table.
+
+**Results block** — shown when MAC or IP is entered; displays current location of the MAC (from `arp_core` or `mac_current`). Switch IP column shows hostname below the IP address where available.
 
 ### MACs on Switches
 
@@ -217,7 +284,7 @@ The **MACs on Switches** page (`/mac-on-switches`) shows the current MAC address
 
 - Select a switch from the dropdown — the table loads automatically via HTMX (no page reload).
 - **Update** button (operator+ only) triggers a live SNMP FDB poll on the selected switch, upserts results into the database, and refreshes the table in place.
-- **Client-side MAC filter** — instant search box above the table (visible only when the table is non-empty); strips `:` and `.` separators so `aabbccddee`, `aa:bb:cc:dd:ee:ff`, and `aabb.ccdd.eeff` all match.
+- **Client-side MAC filter** — instant search box above the table (visible only when the table is non-empty); strips `:` and `.` separators so `aabbccddeeff`, `aa:bb:cc:dd:ee:ff`, and `aabb.ccdd.eeff` all match.
 - Table sorts by interface by default (natural sort: Fa1/0/1 before Fa1/0/10).
 - MACs that disappeared from the switch since the last collection appear as `GONE` entries in the change history.
 
@@ -226,6 +293,7 @@ The **MACs on Switches** page (`/mac-on-switches`) shows the current MAC address
 The **Collector Logs** page (`/collector-logs`) shows the result of every SNMP poll run:
 
 - Filter by **collector type** (FDB / ARP), **switch IP** (partial match), **date range** (preset dropdown or custom From / Until), and **Errors only** toggle.
+- Switch IP column shows hostname below the IP address where available.
 - **Duration** column shows wall-clock time of the SNMP poll (formatted as `Xms` or `X.Xs`).
 - **Changed** / **Gone** counts are highlighted in bold when non-zero; Gone is shown in red.
 - **Status** column: green **OK** badge on success, red **ERROR** badge with the first 60 characters of the error message (full message in tooltip) on failure.
