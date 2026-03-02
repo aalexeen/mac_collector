@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       mac_collector
+      POSTGRES_USER:     mac_collector_user
+      POSTGRES_PASSWORD: mac_collector_pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mac_collector_user -d mac_collector"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      DB_HOST:     db
+      DB_PORT:     5432
+      DB_NAME:     mac_collector
+      DB_USER:     mac_collector_user
+      DB_PASSWORD: mac_collector_pass
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

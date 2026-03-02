@@ -42,6 +42,60 @@ Both collectors write to:
 
 **Web UI** — FastAPI + Jinja2 + HTMX, role-based access (admin / operator / viewer), all actions logged to `audit_log`.
 
+## Docker (Demo / Quick Start)
+
+The fastest way to run the application — no manual PostgreSQL setup required.
+
+### Requirements
+
+- Docker 28+: `sudo apt install docker.io docker-compose-v2`
+- Add your user to the docker group: `sudo usermod -aG docker $USER && newgrp docker`
+
+### Setup
+
+```bash
+cp .env.example .env
+# Edit .env: set SNMP_COMMUNITY to your switch community string
+```
+
+### Run
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
+
+Open http://localhost:8000 and log in as `admin@demo.local` / `admin`.
+
+The container starts two processes:
+- **uvicorn** — web UI on port 8000
+- **collector_loop.py** — polls all enabled switches every `COLLECT_INTERVAL` seconds (default: 300)
+
+PostgreSQL data is stored in a named Docker volume (`pgdata`) and persists across restarts.
+
+### Configuration (`.env`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SNMP_COMMUNITY` | `public` | SNMP v2c community string |
+| `COLLECT_INTERVAL` | `300` | Poll interval in seconds |
+| `DISPLAY_TZ` | `America/New_York` | Timezone for web UI timestamps |
+| `ADMIN_EMAIL` | `admin@demo.local` | Admin account created on first start |
+| `ADMIN_PASSWORD` | `admin` | Admin password created on first start |
+
+### Docker files
+
+```
+docker/
+├── Dockerfile
+├── docker-compose.yml
+└── docker-entrypoint.sh
+.dockerignore
+.env.example
+collector_loop.py
+```
+
+---
+
 ## Production Installation
 
 ```bash
