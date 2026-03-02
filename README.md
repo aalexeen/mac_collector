@@ -61,10 +61,28 @@ cp .env.example .env
 ### Run
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build
+./start.sh
 ```
 
-Open http://localhost:8000 and log in as `admin@demo.local` / `admin`.
+The script checks dependencies, walks you through configuration, generates `.env`, and starts the containers.
+
+Open http://localhost:8000 and log in with the credentials you configured.
+
+### Stop
+
+```bash
+./start.sh --stop          # stop containers (data is preserved)
+./start.sh --stop-reset    # stop containers and delete the database
+```
+
+### All options
+
+```
+./start.sh                 configure (if needed) and start
+./start.sh --stop          stop containers, preserve data
+./start.sh --stop-reset    stop containers and delete database
+./start.sh --help          show this help
+```
 
 The container starts two processes:
 - **uvicorn** — web UI on port 8000
